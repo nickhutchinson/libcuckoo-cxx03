@@ -46,10 +46,16 @@ size_t seed = 0;
 size_t test_len = 10;
 // Whether to use strings as the key
 bool use_strings = false;
+// Whether to run the table in single-threaded mode
+bool single_threaded = false;
 
 template <class T>
 class ReadEnvironment {
     typedef typename T::key_type KType;
+    typedef typename T::mapped_type VType;
+    typedef typename T::hasher Hash;
+    typedef typename T::key_equal Pred;
+    static const bool st = T::single_threaded;
 public:
     // We allocate the vectors with 2^power keys.
     ReadEnvironment()
@@ -75,7 +81,8 @@ public:
         std::vector<std::thread> threads;
         size_t keys_per_thread = numkeys * (load / 100.0) / thread_num;
         for (size_t i = 0; i < thread_num; i++) {
-            threads.emplace_back(insert_thread<KType, ValType>, std::ref(table),
+            threads.emplace_back(insert_thread<KType, VType, Hash, Pred, st>,
+                                 std::ref(table),
                                  keys.begin()+i*keys_per_thread,
                                  keys.begin()+(i+1)*keys_per_thread);
         }
@@ -86,7 +93,8 @@ public:
         init_size = table.size();
         ASSERT_TRUE(init_size == keys_per_thread * thread_num);
 
-        std::cout << "Table with capacity " << numkeys << " prefilled to a load factor of " << load << "%" << std::endl;
+        std::cout << "Table with capacity " << numkeys <<
+            " prefilled to a load factor of " << load << "%" << std::endl;
     }
 
     size_t numkeys;
@@ -99,6 +107,11 @@ public:
 template <class T>
 void ReadThroughputTest(ReadEnvironment<T> *env) {
     typedef typename T::key_type KType;
+    typedef typename T::mapped_type VType;
+    typedef typename T::hasher Hash;
+    typedef typename T::key_equal Pred;
+    static const bool st = T::single_threaded;
+
     std::vector<std::thread> threads;
     std::vector<cacheint> counters(thread_num);
     // We use the first chunk of the threads to read the init_size elements that
@@ -114,14 +127,15 @@ void ReadThroughputTest(ReadEnvironment<T> *env) {
     // When set to true, it signals to the threads to stop running
     std::atomic<bool> finished(false);
     for (size_t i = 0; i < first_threadnum; i++) {
-        threads.emplace_back(read_thread<KType, ValType>, std::ref(env->table),
-                             env->keys.begin() + (i*in_keys_per_thread),
-                             env->keys.begin() + ((i+1)*in_keys_per_thread),
-                             std::ref(counters[i]), true, std::ref(finished));
+        threads.emplace_back(
+            read_thread<KType, VType, Hash, Pred, st>, std::ref(env->table),
+            env->keys.begin() + (i*in_keys_per_thread),
+            env->keys.begin() + ((i+1)*in_keys_per_thread),
+            std::ref(counters[i]), true, std::ref(finished));
     }
     for (size_t i = 0; i < second_threadnum; i++) {
         threads.emplace_back(
-            read_thread<KType, ValType>, std::ref(env->table),
+            read_thread<KType, VType, Hash, Pred, st>, std::ref(env->table),
             env->keys.begin() + (i*out_keys_per_thread) + env->init_size,
             env->keys.begin() + (i+1)*out_keys_per_thread + env->init_size,
             std::ref(counters[first_threadnum+i]), false, std::ref(finished));
@@ -154,21 +168,39 @@ int main(int argc, char** argv) {
         "The number of seconds to run the test for",
         "The seed used by the random number generator"
     };
-    const char* flags[] = {"--use-strings"};
-    bool* flag_vars[] = {&use_strings};
+    const char* flags[] = {"--use-strings", "--single-threaded"};
+    bool* flag_vars[] = {&use_strings, &single_threaded};
     const char* flag_help[] = {
-        "If set, the key type of the map will be std::string"
+        "If set, the key type of the map will be std::string",
+        "If set, we create the table in single-threaded mode"
     };
     parse_flags(argc, argv, "A benchmark for reads", args, arg_vars,
                 arg_help, sizeof(args)/sizeof(const char*), flags,
                 flag_vars, flag_help, sizeof(flags)/sizeof(const char*));
 
-    if (use_strings) {
-        auto *env = new ReadEnvironment<cuckoohash_map<KeyType2, ValType>>;
+    if (use_strings && single_threaded) {
+        auto *env = new ReadEnvironment<
+            cuckoohash_map<KeyType2, ValType, std::hash<KeyType2>,
+                           std::equal_to<KeyType2>, true>>;
+        ReadThroughputTest(env);
+        delete env;
+    } else if (use_strings && !single_threaded) {
+        auto *env = new ReadEnvironment<
+            cuckoohash_map<KeyType2, ValType, std::hash<KeyType2>,
+                           std::equal_to<KeyType2>, false>>;
+        ReadThroughputTest(env);
+        delete env;
+    } else if (!use_strings && single_threaded) {
+        auto *env = new ReadEnvironment<
+            cuckoohash_map<KeyType, ValType, std::hash<KeyType>,
+                           std::equal_to<KeyType>, true>>;
         ReadThroughputTest(env);
         delete env;
     } else {
-        auto *env = new ReadEnvironment<cuckoohash_map<KeyType, ValType>>;
+        // !use_strings && !single_threaded
+        auto *env = new ReadEnvironment<
+            cuckoohash_map<KeyType, ValType, std::hash<KeyType>,
+                           std::equal_to<KeyType>, false>>;
         ReadThroughputTest(env);
         delete env;
     }

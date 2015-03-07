@@ -28,7 +28,7 @@
 
 //! cuckoohash_map is the hash table class.
 template <class Key, class T, class Hash = std::hash<Key>,
-          class Pred = std::equal_to<Key> >
+          class Pred = std::equal_to<Key>, bool SingleThreaded = false>
 class cuckoohash_map {
 public:
     //! key_type is the type of keys.
@@ -41,6 +41,9 @@ public:
     typedef Hash              hasher;
     //! key_equal is the type of the equality predicate.
     typedef Pred              key_equal;
+    //! single_threaded is the boolean indicating whether the hash table is
+    //! single threaded or not.
+    static const bool single_threaded = SingleThreaded;
 
     //! Class returned by operator[] which wraps an entry in the hash table.
     //! Note that this reference type behave somewhat differently from an STL
@@ -118,10 +121,15 @@ private:
         mapped_type>::value;
 
     // number of locks in the locks_ array
-    static const size_t kNumLocks = 1 << 13;
+    static const size_t kNumLocks = single_threaded ? 0 : 1 << 13;
 
     // number of cores on the machine
     static const size_t kNumCores;
+
+    // when we're in single-threaded mode, we want to use 1 thread everywhere
+    // rather than kNumCores, so we have this variable that chooses between
+    // kNumCores and 1 based on SingleThreaded.
+    static const size_t kNumThreads;
 
     // The maximum number of cuckoo operations per insert. This must be less
     // than or equal to SLOT_PER_BUCKET^(MAX_BFS_DEPTH+1)
@@ -294,10 +302,27 @@ private:
         // cacheint for each core in num_inserts and num_deletes.
         TableInfo(const size_t hashpower)
             : hashpower_(hashpower), buckets_(hashsize(hashpower_)),
-              num_inserts(kNumCores), num_deletes(kNumCores) {}
+              num_inserts(kNumThreads), num_deletes(kNumThreads) {}
 
         ~TableInfo() {}
     };
+
+    // When we're in single-threaded mode, we don't want to use an atomic
+    // pointer for our TableInfo, but we also don't want to change all the code
+    // to conditionally use a raw pointer. So we create a wrapper around a raw
+    // pointer with load and store methods just like std::atomic.
+    class TableInfoWrapper {
+        TableInfo* ptr;
+    public:
+        void store(TableInfo* p) {
+            ptr = p;
+        }
+
+        TableInfo* load() const {
+            return ptr;
+        }
+    };
+
 
     // This is a hazard pointer, used to indicate which version of the TableInfo
     // is currently being used in the thread. Since cuckoohash_map operations
@@ -349,9 +374,16 @@ private:
     // a table snapshot. It checks that the thread local hazard pointer pointer
     // is not null, and gets a new pointer if it is null.
     static inline void check_hazard_pointer() {
+        if (single_threaded) return;
         if (hazard_pointer == nullptr) {
             hazard_pointer = global_hazard_pointers.new_hazard_pointer();
         }
+    }
+
+    // set_hazard_pointer sets the hazard pointer to the given pointer.
+    static inline void set_hazard_pointer(TableInfo* ptr) {
+        if (single_threaded) return;
+        *hazard_pointer = ptr;
     }
 
     // Once a function is finished with a version of the table, it will want to
@@ -360,7 +392,8 @@ private:
     class HazardPointerUnsetter {
     public:
         ~HazardPointerUnsetter() {
-            *hazard_pointer = nullptr;
+            if (single_threaded) return;
+            set_hazard_pointer(nullptr);
         }
     };
 
@@ -373,7 +406,7 @@ private:
     // the number of elements in the table.
     static inline void check_counterid() {
         if (counterid < 0) {
-            counterid = rand() % kNumCores;
+            counterid = rand() % kNumThreads;
         }
     }
 
@@ -667,7 +700,9 @@ public:
     }
 
 private:
-    std::atomic<TableInfo*> table_info;
+
+    typename std::conditional<SingleThreaded, TableInfoWrapper,
+                              std::atomic<TableInfo*>>::type table_info;
 
     // old_table_infos holds pointers to old TableInfos that were replaced
     // during expansion. This keeps the memory alive for any leftover
@@ -679,11 +714,13 @@ private:
 
     // lock locks the given bucket index.
     static inline void lock(TableInfo* ti, const size_t i) {
+        if (single_threaded) return;
         ti->locks_[lock_ind(i)].lock();
     }
 
     // unlock unlocks the given bucket index.
     static inline void unlock(TableInfo* ti, const size_t i) {
+        if (single_threaded) return;
         ti->locks_[lock_ind(i)].unlock();
     }
 
@@ -691,6 +728,7 @@ private:
     // first to avoid deadlock. If the two indexes are the same, it just locks
     // one.
     static void lock_two(TableInfo* ti, size_t i1, size_t i2) {
+        if (single_threaded) return;
         i1 = lock_ind(i1);
         i2 = lock_ind(i2);
         if (i1 < i2) {
@@ -707,6 +745,7 @@ private:
     // unlock_two unlocks both of the given bucket indexes, or only one if they
     // are equal. Order doesn't matter here.
     static void unlock_two(TableInfo* ti, size_t i1, size_t i2) {
+        if (single_threaded) return;
         i1 = lock_ind(i1);
         i2 = lock_ind(i2);
         ti->locks_[i1].unlock();
@@ -718,6 +757,7 @@ private:
     // lock_three locks the three bucket indexes in numerical order.
     static void lock_three(TableInfo* ti, size_t i1,
                            size_t i2, size_t i3) {
+        if (single_threaded) return;
         i1 = lock_ind(i1);
         i2 = lock_ind(i2);
         i3 = lock_ind(i3);
@@ -764,6 +804,7 @@ private:
     // unlock_three unlocks the three given buckets
     static void unlock_three(TableInfo* ti, size_t i1,
                              size_t i2, size_t i3) {
+        if (single_threaded) return;
         i1 = lock_ind(i1);
         i2 = lock_ind(i2);
         i3 = lock_ind(i3);
@@ -789,7 +830,7 @@ private:
     TableInfo* snapshot_table_nolock() const {
         while (true) {
             TableInfo* ti = table_info.load();
-            *hazard_pointer = ti;
+            set_hazard_pointer(ti);
             // If the table info has changed in the time we set the hazard
             // pointer, ti could have been deleted, so try again.
             if (ti != table_info.load()) {
@@ -810,7 +851,7 @@ private:
         size_t i1, i2;
         while (true) {
             ti = table_info.load();
-            *hazard_pointer = ti;
+            set_hazard_pointer(ti);
             // If the table info has changed in the time we set the hazard
             // pointer, ti could have been deleted, so try again.
             if (ti != table_info.load()) {
@@ -848,7 +889,7 @@ private:
     TableInfo* snapshot_and_lock_all() const {
         while (true) {
             TableInfo* ti = table_info.load();
-            *hazard_pointer = ti;
+            set_hazard_pointer(ti);
             // If the table info has changed, ti could have been deleted, so try
             // again
             if (ti != table_info.load()) {
@@ -1131,30 +1172,34 @@ private:
             size_t ts = to->slot;
 
             size_t ob = 0;
-            if (depth == 1) {
-                // Even though we are only swapping out of i1 or i2, we have to
-                // lock both of them along with the slot we are swapping to,
-                // since at the end of this function, i1 and i2 must be locked.
-                ob = (fb == i1) ? i2 : i1;
-                lock_three(ti, fb, tb, ob);
-            } else {
-                lock_two(ti, fb, tb);
-            }
-
-            // We plan to kick out fs, but let's check if it is still there;
-            // there's a small chance we've gotten scooped by a later cuckoo. If
-            // that happened, just... try again. Also the slot we are filling in
-            // may have already been filled in by another thread, or the slot we
-            // are moving from may be empty, both of which invalidate the swap.
-            if (!eqfn(ti->buckets_[fb].key(fs), from->key) ||
-                ti->buckets_[tb].occupied(ts) ||
-                !ti->buckets_[fb].occupied(fs)) {
+            if (!single_threaded) {
                 if (depth == 1) {
-                    unlock_three(ti, fb, tb, ob);
+                    // Even though we are only swapping out of i1 or i2, we have
+                    // to lock both of them along with the slot we are swapping
+                    // to, since at the end of this function, i1 and i2 must be
+                    // locked.
+                    ob = (fb == i1) ? i2 : i1;
+                    lock_three(ti, fb, tb, ob);
                 } else {
-                    unlock_two(ti, fb, tb);
+                    lock_two(ti, fb, tb);
                 }
-                return false;
+
+                // We plan to kick out fs, but let's check if it is still there;
+                // there's a small chance we've gotten scooped by a later
+                // cuckoo. If that happened, just... try again. Also the slot we
+                // are filling in may have already been filled in by another
+                // thread, or the slot we are moving from may be empty, both of
+                // which invalidate the swap.
+                if (!eqfn(ti->buckets_[fb].key(fs), from->key) ||
+                    ti->buckets_[tb].occupied(ts) ||
+                    !ti->buckets_[fb].occupied(fs)) {
+                    if (depth == 1) {
+                        unlock_three(ti, fb, tb, ob);
+                    } else {
+                        unlock_two(ti, fb, tb);
+                    }
+                    return false;
+                }
             }
 
             if (!is_simple) {
@@ -1163,16 +1208,18 @@ private:
             ti->buckets_[tb].setKV(ts, ti->buckets_[fb].key(fs),
                                    std::move(ti->buckets_[fb].val(fs)));
             ti->buckets_[fb].eraseKV(fs);
-            if (depth == 1) {
-                // Don't unlock fb or ob, since they are needed in
-                // cuckoo_insert. Only unlock tb if it doesn't unlock the same
-                // bucket as fb or ob.
-                if (lock_ind(tb) != lock_ind(fb) &&
-                    lock_ind(tb) != lock_ind(ob)) {
-                    unlock(ti, tb);
+            if (!single_threaded) {
+                if (depth == 1) {
+                    // Don't unlock fb or ob, since they are needed in
+                    // cuckoo_insert. Only unlock tb if it doesn't unlock the
+                    // same bucket as fb or ob.
+                    if (lock_ind(tb) != lock_ind(fb) &&
+                        lock_ind(tb) != lock_ind(ob)) {
+                        unlock(ti, tb);
+                    }
+                } else {
+                    unlock_two(ti, fb, tb);
                 }
-            } else {
-                unlock_two(ti, fb, tb);
             }
             depth--;
         }
@@ -1606,8 +1653,8 @@ private:
     // insert_into_table is a helper function used by cuckoo_expand_simple to
     // fill up the new table.
     static void insert_into_table(
-        cuckoohash_map<Key, T, Hash>& new_map, const TableInfo* old_ti,
-        size_t i, size_t end) {
+        cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>& new_map,
+        const TableInfo* old_ti, size_t i, size_t end) {
         for (;i < end; ++i) {
             for (size_t j = 0; j < SLOT_PER_BUCKET; ++j) {
                 if (old_ti->buckets_[i].occupied(j)) {
@@ -1637,8 +1684,9 @@ private:
 
         // Creates a new hash table with hashpower n and adds all the
         // elements from the old buckets
-        cuckoohash_map<Key, T, Hash> new_map(hashsize(n) * SLOT_PER_BUCKET);
-        const size_t threadnum = kNumCores;
+        cuckoohash_map<Key, T, Hash, Pred, SingleThreaded> new_map(
+            hashsize(n) * SLOT_PER_BUCKET);
+        const size_t threadnum = kNumThreads;
         const size_t buckets_per_thread =
             hashsize(ti->hashpower_) / threadnum;
         std::vector<std::thread> insertion_threads(threadnum);
@@ -1746,7 +1794,7 @@ public:
         void release() {
             if (has_table_lock) {
                 AllUnlocker au(ti_);
-                cuckoohash_map<Key, T, Hash, Pred>::HazardPointerUnsetter hpu;
+                HazardPointerUnsetter hpu;
                 has_table_lock = false;
             }
         }
@@ -2073,43 +2121,53 @@ public:
 };
 
 // Initializing the static members
-template <class Key, class T, class Hash, class Pred>
-    __thread typename cuckoohash_map<Key, T, Hash, Pred>::TableInfo**
-    cuckoohash_map<Key, T, Hash, Pred>::hazard_pointer = nullptr;
+template <class Key, class T, class Hash, class Pred, bool SingleThreaded>
+__thread typename cuckoohash_map<Key, T, Hash, Pred,
+                                 SingleThreaded>::TableInfo**
+cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::hazard_pointer = nullptr;
 
-template <class Key, class T, class Hash, class Pred>
-    __thread int cuckoohash_map<Key, T, Hash, Pred>::counterid = -1;
+template <class Key, class T, class Hash, class Pred, bool SingleThreaded>
+__thread int cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::counterid = -1;
 
-template <class Key, class T, class Hash, class Pred>
-    typename cuckoohash_map<Key, T, Hash, Pred>::hasher
-    cuckoohash_map<Key, T, Hash, Pred>::hashfn;
+template <class Key, class T, class Hash, class Pred, bool SingleThreaded>
+typename cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::hasher
+cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::hashfn;
 
-template <class Key, class T, class Hash, class Pred>
-    typename cuckoohash_map<Key, T, Hash, Pred>::key_equal
-    cuckoohash_map<Key, T, Hash, Pred>::eqfn;
+template <class Key, class T, class Hash, class Pred, bool SingleThreaded>
+typename cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::key_equal
+cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::eqfn;
 
-template <class Key, class T, class Hash, class Pred>
-    typename cuckoohash_map<Key, T, Hash, Pred>::GlobalHazardPointerList
-    cuckoohash_map<Key, T, Hash, Pred>::global_hazard_pointers;
+template <class Key, class T, class Hash, class Pred, bool SingleThreaded>
+typename cuckoohash_map<Key, T, Hash, Pred,
+                        SingleThreaded>::GlobalHazardPointerList
+cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::global_hazard_pointers;
 
-template <class Key, class T, class Hash, class Pred>
-    const size_t cuckoohash_map<Key, T, Hash, Pred>::kNumCores =
+template <class Key, class T, class Hash, class Pred, bool SingleThreaded>
+const size_t cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::kNumCores =
     std::thread::hardware_concurrency() == 0 ?
     sysconf(_SC_NPROCESSORS_ONLN) : std::thread::hardware_concurrency();
 
-template <class Key, class T, class Hash, class Pred>
-    const std::out_of_range
-    cuckoohash_map<Key, T, Hash, Pred>::const_iterator::end_dereference(
-        "Cannot dereference: iterator points past the end of the table");
+template <class Key, class T, class Hash, class Pred, bool SingleThreaded>
+const size_t cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::kNumThreads =
+    SingleThreaded ? 1 :
+    cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::kNumCores;
 
-template <class Key, class T, class Hash, class Pred>
-    const std::out_of_range
-    cuckoohash_map<Key, T, Hash, Pred>::const_iterator::end_increment(
-        "Cannot increment: iterator points past the end of the table");
 
-template <class Key, class T, class Hash, class Pred>
-    const std::out_of_range
-    cuckoohash_map<Key, T, Hash, Pred>::const_iterator::begin_decrement(
-        "Cannot decrement: iterator points to the beginning of the table");
+template <class Key, class T, class Hash, class Pred, bool SingleThreaded>
+const std::out_of_range
+cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::const_iterator
+::end_dereference(
+    "Cannot dereference: iterator points past the end of the table");
+
+template <class Key, class T, class Hash, class Pred, bool SingleThreaded>
+const std::out_of_range
+cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::const_iterator
+::end_increment("Cannot increment: iterator points past the end of the table");
+
+template <class Key, class T, class Hash, class Pred, bool SingleThreaded>
+const std::out_of_range
+cuckoohash_map<Key, T, Hash, Pred, SingleThreaded>::const_iterator
+::begin_decrement(
+    "Cannot decrement: iterator points to the beginning of the table");
 
 #endif

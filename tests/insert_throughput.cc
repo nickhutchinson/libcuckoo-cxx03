@@ -46,10 +46,17 @@ size_t end_load = 90;
 size_t seed = 0;
 // Whether to use strings as the key
 bool use_strings = false;
+// Whether to run the table in single-threaded mode
+bool single_threaded = false;
 
 template <class T>
 class InsertEnvironment {
     typedef typename T::key_type KType;
+    typedef typename T::mapped_type VType;
+    typedef typename T::hasher Hash;
+    typedef typename T::key_equal Pred;
+    static const bool st = T::single_threaded;
+
 public:
     InsertEnvironment()
         : numkeys(1U << power), table(numkeys), keys(numkeys) {
@@ -74,9 +81,10 @@ public:
         std::vector<std::thread> threads;
         size_t keys_per_thread = numkeys * (begin_load / 100.0) / thread_num;
         for (size_t i = 0; i < thread_num; i++) {
-            threads.emplace_back(insert_thread<KType, ValType>, std::ref(table),
-                                 keys.begin()+i*keys_per_thread,
-                                 keys.begin()+(i+1)*keys_per_thread);
+            threads.emplace_back(
+                insert_thread<KType, VType, Hash, Pred, st>, std::ref(table),
+                keys.begin()+i*keys_per_thread,
+                keys.begin()+(i+1)*keys_per_thread);
         }
         for (size_t i = 0; i < threads.size(); i++) {
             threads[i].join();
@@ -99,6 +107,11 @@ public:
 template <class T>
 void InsertThroughputTest(InsertEnvironment<T> *env) {
     typedef typename T::key_type KType;
+    typedef typename T::mapped_type VType;
+    typedef typename T::hasher Hash;
+    typedef typename T::key_equal Pred;
+    static const bool st = T::single_threaded;
+
     std::vector<std::thread> threads;
     size_t keys_per_thread = env->numkeys * ((end_load-begin_load) / 100.0) /
         thread_num;
@@ -106,7 +119,7 @@ void InsertThroughputTest(InsertEnvironment<T> *env) {
     gettimeofday(&t1, NULL);
     for (size_t i = 0; i < thread_num; i++) {
         threads.emplace_back(
-            insert_thread<KType, ValType>, std::ref(env->table),
+            insert_thread<KType, VType, Hash, Pred, st>, std::ref(env->table),
             env->keys.begin()+(i*keys_per_thread)+env->init_size,
             env->keys.begin()+((i+1)*keys_per_thread)+env->init_size);
     }
@@ -140,10 +153,11 @@ int main(int argc, char** argv) {
         "throughput",
         "The seed used by the random number generator"
     };
-    const char* flags[] = {"--use-strings"};
-    bool* flag_vars[] = {&use_strings};
+    const char* flags[] = {"--use-strings", "--single-threaded"};
+    bool* flag_vars[] = {&use_strings, &single_threaded};
     const char* flag_help[] = {
-        "If set, the key type of the map will be std::string"
+        "If set, the key type of the map will be std::string",
+        "If set, we create the table in single-threaded mode"
     };
     parse_flags(argc, argv, "A benchmark for inserts", args, arg_vars, arg_help,
                 sizeof(args)/sizeof(const char*), flags, flag_vars, flag_help,
@@ -158,12 +172,29 @@ int main(int argc, char** argv) {
         exit(1);
     }
 
-    if (use_strings) {
-        auto *env = new InsertEnvironment<cuckoohash_map<KeyType2, ValType>>;
+    if (use_strings && single_threaded) {
+        auto *env = new InsertEnvironment<
+            cuckoohash_map<KeyType2, ValType, std::hash<KeyType2>,
+                           std::equal_to<KeyType2>, true>>();
+        InsertThroughputTest(env);
+        delete env;
+    } else if (use_strings && !single_threaded) {
+        auto *env = new InsertEnvironment<
+            cuckoohash_map<KeyType2, ValType, std::hash<KeyType2>,
+                           std::equal_to<KeyType2>, false>>();
+        InsertThroughputTest(env);
+        delete env;
+    } else if (!use_strings && single_threaded) {
+        auto *env = new InsertEnvironment<
+            cuckoohash_map<KeyType, ValType, std::hash<KeyType>,
+                           std::equal_to<KeyType>, true>>();
         InsertThroughputTest(env);
         delete env;
     } else {
-        auto *env = new InsertEnvironment<cuckoohash_map<KeyType, ValType>>;
+        // !use_strings && !single_threaded
+        auto *env = new InsertEnvironment<
+            cuckoohash_map<KeyType, ValType, std::hash<KeyType>,
+                           std::equal_to<KeyType>, false>>();
         InsertThroughputTest(env);
         delete env;
     }

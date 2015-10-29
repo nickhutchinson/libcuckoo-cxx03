@@ -6,6 +6,7 @@
 *.o
 *.out
 *.trs
+*.pyc
 *~
 .DS_Store
 .deps

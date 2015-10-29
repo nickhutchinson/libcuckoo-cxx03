@@ -8,6 +8,7 @@
 #include <cstring>
 #include <iostream>
 #include <mutex>
+#include <random>
 #include "../src/cuckoohash_map.hh"
 #include <tbb/concurrent_hash_map.h>
 
@@ -240,6 +241,79 @@ public:
                 reads++;
             }
         }
+    }
+};
+
+// An overloaded class that does a mixture of reads and inserts for different
+// table types. It repeatedly searches for the keys in the given range until
+// everything has been inserted.
+template <class Table>
+class read_insert_thread {
+public:
+    typedef typename std::vector<typename Table::key_type>::iterator it_t;
+    static void func(Table& table, it_t begin, it_t end,
+                     std::atomic<size_t>& counter, const double insert_prob,
+                     const size_t start_seed) {
+        typename Table::mapped_type v;
+        std::mt19937_64 gen(start_seed);
+        std::uniform_real_distribution<double> dist(0.0, 1.0);
+        auto inserter_it = begin;
+        auto reader_it = begin;
+        size_t ops = 0;
+        while (inserter_it != end) {
+            if (dist(gen) < insert_prob) {
+                // Do an insert
+                ASSERT_TRUE(table.insert(*inserter_it, 0));
+                ++inserter_it;
+            } else {
+                // Do a read
+                ASSERT_EQ(table.find(*reader_it, v), (reader_it < inserter_it));
+                ++reader_it;
+                if (reader_it == end) {
+                    reader_it = begin;
+                }
+            }
+            ++ops;
+        }
+        counter.fetch_add(ops);
+    }
+};
+
+template <class K, class V>
+class read_insert_thread<tbb::concurrent_hash_map<K, V>> {
+public:
+    typedef typename tbb::concurrent_hash_map<K, V> Table;
+    typedef typename std::vector<K>::iterator it_t;
+    static void func(Table& table, it_t begin, it_t end,
+                     std::atomic<size_t>& counter, const double insert_prob,
+                     const size_t start_seed) {
+        std::mt19937_64 gen(start_seed);
+        std::uniform_real_distribution<double> dist(0.0, 1.0);
+        auto inserter_it = begin;
+        auto reader_it = begin;
+        size_t ops = 0;
+        typename Table::accessor a;
+        typename Table::const_accessor aconst;
+        while (inserter_it != end) {
+            if (dist(gen) < insert_prob) {
+                // Do an insert
+                ASSERT_TRUE(table.insert(a, *inserter_it));
+                a->second = 0;
+                ++inserter_it;
+                a.release();
+            } else {
+                // Do a read
+                ASSERT_EQ(table.find(aconst, *reader_it),
+                          (reader_it < inserter_it));
+                ++reader_it;
+                if (reader_it == end) {
+                    reader_it = begin;
+                }
+                aconst.release();
+            }
+            ++ops;
+        }
+        counter.fetch_add(ops);
     }
 };
 

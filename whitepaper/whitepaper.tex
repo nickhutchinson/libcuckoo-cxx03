@@ -3,6 +3,7 @@
 \usepackage{fullpage}
 \usepackage{graphicx}
 \usepackage{subfig}
+\usepackage[colorlinks, linkcolor=blue]{hyperref}
 
 \newcommand{\tbbmap}{\texttt{concurrent\textunderscore hash\textunderscore map}}
 \newcommand{\libcuckoo}{\texttt{libcuckoo}}
@@ -18,11 +19,17 @@
 \section*{Overview}
 
 In this benchmark, we compare {\libcuckoo}, our high-performance,
-memory-efficient hash table, with the Intel Thread Building Blocks {\tbbmap}. We
-compare the performance of the two tables across different types of workloads
-and different numbers of cores, and also compare the memory usage for different
-table sizes. We ran the benchmarks on a machine with 36 Intel Xenon 2.9 GHz
-cores and 60GB memory. The cores were split evenly into two NUMA nodes.
+memory-efficient hash table, with the Intel Thread Building Blocks {\tbbmap}
+version 4.4. We compare the performance of the two tables across different types
+of workloads and different numbers of cores, and also compare the memory usage
+for different table sizes. We ran the benchmarks on a machine with 36 Intel Xeon
+2.9 GHz cores and 60GB memory. The cores were split evenly into two NUMA nodes.
+
+The benchmarks we ran measure pure read, pure insert, and mixed read-insert
+performance, as well as peak memory usage. For the performance benchmarks, we
+benchmarked maps with 64-bit integer keys, randomly shuffled numbers in the
+range 0 to the capacity of the table, as well as maps with 100-character string
+keys, designed to maximize comparison time.
 
 \section*{Pure Read}
 Our read benchmark fills a table up to 90\% of its allocated capacity, then
@@ -47,11 +54,18 @@ Our insert benchmark measures the time taken to fill up a table from 0\% to 90\%
 of its allocated capacity. Figure~\ref{fig:pure-insert} compares the insert
 throughput with integer and string keys. For integers, {\libcuckoo} greatly
 outperforms {\tbbmap}, by over 680\%, and for strings, it outperforms {\tbbmap}
-by 50\%. We suspect that TBB's low performance on integers was due to the fact
-that it doesn't deal well with multiple NUMA clusters. This would explain the
-poor scaling with large numbers of threads on different NUMA clusters. With
-strings, since the cost of copying strings likely dominates the runtime, this
-effect is less apparent.
+by 50\%. It is interesting to note that {\tbbmap}'s performance actually drops
+when we go from 4 threads to 16 threads, and then increases only slightly when
+we go up to 32 threads. We suspect that part of the reason for this poor scaling
+is due to the fact that {\tbbmap} doesn't deal well with multiple NUMA clusters,
+because data tends to be modified by CPUs on different NUMA clusters.
+{\libcuckoo} specifically avoids this issue by separating all shared data by
+core, so minimal data ends up being transferred across NUMA nodes.
+Figure~\ref{fig:pure-insert-one-numa} confirms this hypothesis, showing an over
+240\% increase in throughput for {\tbbmap}, when we restrict the workload to one
+NUMA node, compared to a more modest 26\% increase in throughput for
+{\libcuckoo}. With strings, since the cost of copying strings likely dominates
+the runtime, this effect is less apparent.
 
 \begin{figure}[!htbp]
   \centering
@@ -59,6 +73,13 @@ effect is less apparent.
   \subfloat[]{{\includegraphics[width=0.5\textwidth]{insert-string}}}
   \caption{Pure insert throughput for integer and string keys}
   \label{fig:pure-insert}
+\end{figure}
+
+\begin{figure}[!htbp]
+  \centering
+  \includegraphics[width=0.5\textwidth]{insert-integer-one-numa}
+  \caption{Pure insert  for integer and string keys on one NUMA node}
+  \label{fig:pure-insert-one-numa}
 \end{figure}
 
 \section*{Mixed Workload}
@@ -84,14 +105,15 @@ pronounced for inserts than it is for reads.
 Finally, we compare the approximate memory usage of the two tables. While not a
 completely accurate measure of the amount of memory used by each table, we
 measured the maximum resident set size as determined by Ubuntu's \texttt{time}
-command for the insert benchmark. For integers, {\libcuckoo} scales far better
-than {\tbbmap}, using 72\% less memory than {\tbbmap} with the largest table.
+command for the insert benchmark, which is the peak memory usage for the
+process. For integers, {\libcuckoo} scales far better than {\tbbmap}, using 72\%
+less memory than {\tbbmap} with the largest table.
 
 \begin{figure}[!htbp]
   \centering
   \includegraphics[width=0.5\textwidth]{mem}
-  \caption{Memory usage for insert benchmark with integer keys. Table size is
-    the number of elements each table has capacity for}
+  \caption{Peak memory usage for insert benchmark with integer keys. Table size
+    is the number of elements each table has capacity for}
   \label{fig:mem}
 \end{figure}
 

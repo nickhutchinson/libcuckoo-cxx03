@@ -61,11 +61,13 @@ is due to the fact that {\tbbmap} doesn't deal well with multiple NUMA clusters,
 because data tends to be modified by CPUs on different NUMA clusters.
 {\libcuckoo} specifically avoids this issue by separating all shared data by
 core, so minimal data ends up being transferred across NUMA nodes.
-Figure~\ref{fig:pure-insert-one-numa} confirms this hypothesis, showing an over
-240\% increase in throughput for {\tbbmap}, when we restrict the workload to one
-NUMA node, compared to a more modest 26\% increase in throughput for
-{\libcuckoo}. With strings, since the cost of copying strings likely dominates
-the runtime, this effect is less apparent.
+Figure~\ref{fig:pure-insert-one-numa} confirms this hypothesis. {\tbbmap}
+increases its throughput by over 240\% on 16 threads, compared to its
+performance in Figure~\ref{fig:pure-insert}, while {\libcuckoo} is not much
+affected by restricting to one NUMA node, increasing throughput by a more modest
+26\%. In both cases, {\libcuckoo} significantly outperforms {\tbbmap} on integer
+inserts. With strings, since the cost of copying strings likely dominates the
+runtime, this effect is less apparent.
 
 \begin{figure}[!htbp]
   \centering

@@ -56,18 +56,29 @@ throughput with integer and string keys. For integers, {\libcuckoo} greatly
 outperforms {\tbbmap}, by over 680\%, and for strings, it outperforms {\tbbmap}
 by 50\%. It is interesting to note that {\tbbmap}'s performance actually drops
 when we go from 4 threads to 16 threads, and then increases only slightly when
-we go up to 32 threads. We suspect that part of the reason for this poor scaling
-is due to the fact that {\tbbmap} doesn't deal well with multiple NUMA clusters,
-because data tends to be modified by CPUs on different NUMA clusters.
-{\libcuckoo} specifically avoids this issue by separating all shared data by
-core, so minimal data ends up being transferred across NUMA nodes.
-Figure~\ref{fig:pure-insert-one-numa} confirms this hypothesis. {\tbbmap}
-increases its throughput by over 240\% on 16 threads, compared to its
-performance in Figure~\ref{fig:pure-insert}, while {\libcuckoo} is not much
-affected by restricting to one NUMA node, increasing throughput by a more modest
-26\%. In both cases, {\libcuckoo} significantly outperforms {\tbbmap} on integer
-inserts. With strings, since the cost of copying strings likely dominates the
-runtime, this effect is less apparent.
+we go up to 32 threads. With strings, since the cost of copying strings likely
+dominates the runtime, this effect is less apparent.
+
+We suspect that part of the reason for this poor scaling is due to the fact that
+{\tbbmap} doesn't deal well with multiple NUMA clusters, because data tends to
+be modified by CPUs on different NUMA clusters. {\libcuckoo} specifically avoids
+this issue by separating all shared data by core, so minimal data ends up being
+transferred across NUMA nodes. Figure~\ref{fig:pure-insert-one-numa} confirms
+this hypothesis. {\tbbmap} increases its throughput by over 240\% on 16 threads,
+compared to its performance in Figure~\ref{fig:pure-insert}, while {\libcuckoo}
+is not much affected by restricting to one NUMA node, increasing throughput by a
+more modest 26\%. In both cases, {\libcuckoo} significantly outperforms
+{\tbbmap} on integer inserts.
+
+Another possibility for the performance difference is the data cache or TLB miss
+rate. We roughly examined these numbers for both tables, and found that the
+cache miss rate was about the same for both tables, with {\libcuckoo} tending to
+be slightly lower. The TLB miss rate, however, was far higher for {\tbbmap},
+likely due to the larger memory footprint. We mitigated this problem by
+utilizing linux hugepages in {\tbbmap}, and, while this did decrease the TLB
+miss rate of {\tbbmap} significantly, it had no effect on performance. So
+ultimately, cache and TLB miss rates do not seem to explain the performance
+difference for inserts.
 
 \begin{figure}[!htbp]
   \centering

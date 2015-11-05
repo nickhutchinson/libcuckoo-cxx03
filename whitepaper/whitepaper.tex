@@ -23,7 +23,9 @@ memory-efficient hash table, with the Intel Thread Building Blocks {\tbbmap}
 version 4.4. We compare the performance of the two tables across different types
 of workloads and different numbers of cores, and also compare the memory usage
 for different table sizes. We ran the benchmarks on a machine with 36 Intel Xeon
-2.9 GHz cores and 60GB memory. The cores were split evenly into two NUMA nodes.
+E5-2666 v3 2.9 GHz (Haswell) CPUs and 60GB memory. Specifically, the machine had
+2 sockets, each as its own NUMA node, each with a 9-core chip and 2-thread
+hyperthreading per core.
 
 The benchmarks we ran measure pure read, pure insert, and mixed read-insert
 performance, as well as peak memory usage. For the performance benchmarks, we

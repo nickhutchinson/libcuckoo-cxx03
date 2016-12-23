@@ -55,7 +55,7 @@ public:
     }
 
 private:
-    cuckoohash_map<KEY, VALUE, std::hash<KEY> > tbl;
+    cuckoohash_map<KEY, VALUE, boost::hash<KEY> > tbl;
 };
 
 #else

@@ -57,6 +57,12 @@ public:
 
 typedef cuckoohash_map<Foo, bool, foo_hasher, foo_eq> foo_map;
 
+struct NegateFn {
+    void operator()(bool& val) const {
+        val = !val;
+    }
+};
+
 TEST_CASE("heterogeneous compare", "[heterogeneous compare]") {
     // setup code
     int_constructions = 0;
@@ -187,7 +193,7 @@ TEST_CASE("heterogeneous compare", "[heterogeneous compare]") {
         {
             foo_map map;
             map.insert(0, true);
-            REQUIRE(map.update_fn(0, [](bool& val) { val = !val; }));
+            REQUIRE(map.update_fn(0, NegateFn()));
             REQUIRE(!map.find(0));
         }
         REQUIRE(int_constructions == 1);
@@ -203,11 +209,10 @@ TEST_CASE("heterogeneous compare", "[heterogeneous compare]") {
         {
             foo_map map(0);
             map.rehash(2);
-            auto neg = [](bool& val) { val = !val; };
-            map.upsert(0, neg, true);
-            map.upsert(0, neg, true);
+            map.upsert(0, NegateFn(), true);
+            map.upsert(0, NegateFn(), true);
             // Shouldn't do comparison because of different partial key
-            map.upsert(4, neg, false);
+            map.upsert(4, NegateFn(), false);
             REQUIRE(!map.find(0));
             REQUIRE(!map.find(4));
         }

@@ -1,5 +1,7 @@
 #include <catch.hpp>
 
+#include <boost/functional/hash.hpp>
+
 #include <libcuckoo/cuckoohash_map.hh>
 #include "unit_test_util.hh"
 
@@ -42,14 +44,14 @@ TEST_CASE("reserve calc", "[resize]") {
                 2500000 * slot_per_bucket) == 22);
 
     REQUIRE(UnitTestInternalAccess::reserve_calc<IntIntTable>(
-                (1UL << 31) * slot_per_bucket) == 31);
+                (1ULL << 31) * slot_per_bucket) == 31);
     REQUIRE(UnitTestInternalAccess::reserve_calc<IntIntTable>(
-                ((1UL << 31) + 1) * slot_per_bucket == 31));
+                ((1ULL << 31) + 1) * slot_per_bucket == 31));
 
     REQUIRE(UnitTestInternalAccess::reserve_calc<IntIntTable>(
-                (1UL << 61) * slot_per_bucket) == 61);
+                (1ULL << 61) * slot_per_bucket) == 61);
     REQUIRE(UnitTestInternalAccess::reserve_calc<IntIntTable>(
-                ((1UL << 61) + 1) * slot_per_bucket == 61));
+                ((1ULL << 61) + 1) * slot_per_bucket == 61));
 
 }
 
@@ -64,12 +66,13 @@ struct my_type {
 size_t my_type::num_deletes = 0;
 
 TEST_CASE("Resizing number of frees", "[resize]") {
-    my_type val{0};
+    my_type val = {0};
     size_t num_deletes_after_resize;
     {
         // Should allocate 2 buckets of 4 slots
-        cuckoohash_map<int, my_type, std::hash<int>, std::equal_to<int>,
-                       std::allocator<std::pair<const int, my_type>>, 4> map(2);
+        cuckoohash_map<int, my_type, boost::hash<int>, std::equal_to<int>,
+                       std::allocator<std::pair<const int, my_type> >, 4>
+            map(2);
         for (int i = 0; i < 9; ++i) {
             map.insert(i, val);
         }

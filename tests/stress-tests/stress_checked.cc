@@ -2,25 +2,25 @@
 // that multiple operations are not run on the same key, so that the accuracy of
 // the operations can be verified.
 
+#include <stdint.h>
+
 #include <algorithm>
-#include <array>
-#include <atomic>
-#include <chrono>
-#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <mutex>
-#include <random>
 #include <stdexcept>
-#include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
 #include <libcuckoo/cuckoohash_map.hh>
 #include <test_util.hh>
-#include <pcg/pcg_random.hpp>
+
+#include <boost/atomic.hpp>
+#include <boost/chrono.hpp>
+#include <boost/container/vector.hpp>
+#include <boost/move/unique_ptr.hpp>
+#include <boost/random.hpp>
+#include <boost/thread.hpp>
 
 typedef uint32_t KeyType;
 typedef std::string KeyType2;
@@ -55,10 +55,10 @@ size_t g_seed = 0;
 // Whether to use strings as the key
 bool g_use_strings = false;
 
-std::atomic<size_t> num_inserts = ATOMIC_VAR_INIT(0);
-std::atomic<size_t> num_deletes = ATOMIC_VAR_INIT(0);
-std::atomic<size_t> num_updates = ATOMIC_VAR_INIT(0);
-std::atomic<size_t> num_finds = ATOMIC_VAR_INIT(0);
+boost::atomic<size_t> num_inserts;
+boost::atomic<size_t> num_deletes;
+boost::atomic<size_t> num_updates;
+boost::atomic<size_t> num_finds;
 
 template <class KType>
 class AllEnvironment {
@@ -66,7 +66,7 @@ public:
     AllEnvironment()
         : table(g_numkeys), table2(g_numkeys), keys(g_numkeys), vals(g_numkeys),
           vals2(g_numkeys), in_table(new bool[g_numkeys]),
-          in_use(new std::atomic_flag[g_numkeys]),
+          in_use(new boost::atomic_flag[g_numkeys]),
           val_dist(std::numeric_limits<ValType>::min(),
                    std::numeric_limits<ValType>::max()),
           val_dist2(std::numeric_limits<ValType2>::min(),
@@ -74,7 +74,8 @@ public:
           ind_dist(0, g_numkeys-1), finished(false) {
         // Sets up the random number generator
         if (g_seed == 0) {
-            g_seed = std::chrono::system_clock::now().time_since_epoch().count();
+            g_seed =
+                boost::chrono::system_clock::now().time_since_epoch().count();
         }
         std::cout << "seed = " << g_seed << std::endl;
         gen_seed = g_seed;
@@ -89,22 +90,22 @@ public:
 
     cuckoohash_map<KType, ValType> table;
     cuckoohash_map<KType, ValType2> table2;
-    std::vector<KType> keys;
-    std::vector<ValType> vals;
-    std::vector<ValType2> vals2;
-    std::unique_ptr<bool[]> in_table;
-    std::unique_ptr<std::atomic_flag[]> in_use;
-    std::uniform_int_distribution<ValType> val_dist;
-    std::uniform_int_distribution<ValType2> val_dist2;
-    std::uniform_int_distribution<size_t> ind_dist;
+    boost::container::vector<KType> keys;
+    boost::container::vector<ValType> vals;
+    boost::container::vector<ValType2> vals2;
+    boost::movelib::unique_ptr<bool[]> in_table;
+    boost::movelib::unique_ptr<boost::atomic_flag[]> in_use;
+    boost::random::uniform_int_distribution<ValType> val_dist;
+    boost::random::uniform_int_distribution<ValType2> val_dist2;
+    boost::random::uniform_int_distribution<size_t> ind_dist;
     size_t gen_seed;
     // When set to true, it signals to the threads to stop running
-    std::atomic<bool> finished;
+    boost::atomic<bool> finished;
 };
 
 template <class KType>
 void stress_insert_thread(AllEnvironment<KType> *env) {
-    pcg64_fast gen(env->gen_seed);
+    boost::random::mt19937_64 gen(env->gen_seed);
     while (!env->finished.load()) {
         // Pick a random number between 0 and g_numkeys. If that slot is
         // not in use, lock the slot. Insert a random value into both
@@ -128,7 +129,7 @@ void stress_insert_thread(AllEnvironment<KType> *env) {
                 env->vals[ind] = v;
                 env->vals2[ind] = v2;
                 env->in_table[ind] = true;
-                num_inserts.fetch_add(2, std::memory_order_relaxed);
+                num_inserts.fetch_add(2, boost::memory_order_relaxed);
             }
             env->in_use[ind].clear();
         }
@@ -137,7 +138,7 @@ void stress_insert_thread(AllEnvironment<KType> *env) {
 
 template <class KType>
 void delete_thread(AllEnvironment<KType> *env) {
-    pcg64_fast gen(env->gen_seed);
+    boost::random::mt19937_64 gen(env->gen_seed);
     while (!env->finished.load()) {
         // Run deletes on a random key, check that the deletes
         // succeeded only if the keys were in the table. If the
@@ -156,19 +157,26 @@ void delete_thread(AllEnvironment<KType> *env) {
                 EXPECT_FALSE(env->table.find(k, find_v));
                 EXPECT_FALSE(env->table2.find(k, find_v2));
                 env->in_table[ind] = false;
-                num_deletes.fetch_add(2, std::memory_order_relaxed);
+                num_deletes.fetch_add(2, boost::memory_order_relaxed);
             }
             env->in_use[ind].clear();
         }
     }
 }
 
+template <typename ValType, ValType Delta>
+struct UpdateFn {
+    void operator()(ValType& v) {
+        v += Delta;
+    }
+};
+
 template <class KType>
 void update_thread(AllEnvironment<KType> *env) {
-    pcg64_fast gen(env->gen_seed);
-    std::uniform_int_distribution<size_t> third(0, 2);
-    auto updatefn = [](ValType& v) { v += 3; };
-    auto updatefn2 = [](ValType2& v) { v += 10; };
+    boost::random::mt19937_64 gen(env->gen_seed);
+    boost::random::uniform_int_distribution<size_t> third(0, 2);
+    UpdateFn<ValType, 3> updatefn;
+    UpdateFn<ValType2, 10> updatefn2;
     while (!env->finished.load()) {
         // Run updates, update_fns, or upserts on a random key, check
         // that the operations succeeded only if the keys were in the
@@ -230,7 +238,7 @@ void update_thread(AllEnvironment<KType> *env) {
                 EXPECT_EQ(v2, env->table2.find(k));
                 env->vals[ind] = v;
                 env->vals2[ind] = v2;
-                num_updates.fetch_add(2, std::memory_order_relaxed);
+                num_updates.fetch_add(2, boost::memory_order_relaxed);
             }
             env->in_use[ind].clear();
         }
@@ -239,7 +247,7 @@ void update_thread(AllEnvironment<KType> *env) {
 
 template <class KType>
 void find_thread(AllEnvironment<KType> *env) {
-    pcg64_fast gen(env->gen_seed);
+    boost::random::mt19937_64 gen(env->gen_seed);
     while (!env->finished.load()) {
         // Run finds on a random key and check that the presence of
         // the keys matches in_table
@@ -258,7 +266,7 @@ void find_thread(AllEnvironment<KType> *env) {
             } catch (const std::out_of_range&) {
                 EXPECT_FALSE(env->in_table[ind]);
             }
-            num_finds.fetch_add(2, std::memory_order_relaxed);
+            num_finds.fetch_add(2, boost::memory_order_relaxed);
             env->in_use[ind].clear();
         }
     }
@@ -267,23 +275,27 @@ void find_thread(AllEnvironment<KType> *env) {
 // Spawns g_thread_num insert, delete, update, and find threads
 template <class KType>
 void StressTest(AllEnvironment<KType> *env) {
-    std::vector<std::thread> threads;
+    boost::container::vector<boost::thread> threads;
     for (size_t i = 0; i < g_thread_num; i++) {
         if (!g_disable_inserts) {
-            threads.emplace_back(stress_insert_thread<KType>, env);
+            void (*f)(AllEnvironment<KType>*) = stress_insert_thread<KType>;
+            threads.emplace_back(f, env);
         }
         if (!g_disable_deletes) {
-            threads.emplace_back(delete_thread<KType>, env);
+            void (*f)(AllEnvironment<KType>*) = delete_thread<KType>;
+            threads.emplace_back(f, env);
         }
         if (!g_disable_updates) {
-            threads.emplace_back(update_thread<KType>, env);
+            void (*f)(AllEnvironment<KType>*) = update_thread<KType>;
+            threads.emplace_back(f, env);
         }
         if (!g_disable_finds) {
-            threads.emplace_back(find_thread<KType>, env);
+            void (*f)(AllEnvironment<KType>*) = find_thread<KType>;
+            threads.emplace_back(f, env);
         }
     }
     // Sleeps before ending the threads
-    sleep(g_test_len);
+    boost::this_thread::sleep_for(boost::chrono::seconds(g_test_len));
     env->finished.store(true);
     for (size_t i = 0; i < threads.size(); i++) {
         threads[i].join();
@@ -304,6 +316,9 @@ void StressTest(AllEnvironment<KType> *env) {
 }
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    win32_disable_error_dialogs();
+#endif
     const char* args[] = {"--power", "--thread-num", "--time", "--seed"};
     size_t* arg_vars[] = {&g_power, &g_thread_num, &g_test_len, &g_seed};
     const char* arg_help[] = {
@@ -330,14 +345,14 @@ int main(int argc, char** argv) {
     parse_flags(argc, argv, "Runs a stress test on inserts, deletes, and finds",
                 args, arg_vars, arg_help, sizeof(args)/sizeof(const char*),
                 flags, flag_vars, flag_help, sizeof(flags)/sizeof(const char*));
-    g_numkeys = 1U << g_power;
+    g_numkeys = 1ULL << g_power;
 
     if (g_use_strings) {
-        auto *env = new AllEnvironment<KeyType2>;
+        AllEnvironment<KeyType2>* env = new AllEnvironment<KeyType2>;
         StressTest(env);
         delete env;
     } else {
-        auto *env = new AllEnvironment<KeyType>;
+        AllEnvironment<KeyType>* env = new AllEnvironment<KeyType>;
         StressTest(env);
         delete env;
     }

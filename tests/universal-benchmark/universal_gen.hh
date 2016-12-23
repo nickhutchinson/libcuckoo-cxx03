@@ -1,10 +1,15 @@
 #ifndef _UNIVERSAL_GEN_HH
 #define _UNIVERSAL_GEN_HH
 
+#include <stdint.h>
 #include <bitset>
-#include <cstdint>
 #include <memory>
 #include <string>
+
+#include <boost/config.hpp>
+#include <boost/lexical_cast.hpp>
+#include <boost/make_shared.hpp>
+#include <boost/shared_ptr.hpp>
 
 /* A specialized functor for generating unique keys and values for various
  * types. Must define one for each type we want to use. */
@@ -29,10 +34,10 @@ public:
 
 template <>
 class Gen<std::string> {
-    static constexpr size_t STRING_SIZE = 100;
+    BOOST_STATIC_CONSTEXPR size_t STRING_SIZE = 100;
 public:
     static std::string key(uint64_t num) {
-        return std::to_string(Gen<uint64_t>::key(num));
+        return boost::lexical_cast<std::string>(Gen<uint64_t>::key(num));
     }
 
     static std::string value() {
@@ -41,7 +46,7 @@ public:
 };
 
 // Should be 1KB. Bitset is nice since it already has std::hash specialized.
-using MediumBlob = std::bitset<8192>;
+typedef std::bitset<8192> MediumBlob;
 
 template <>
 class Gen<MediumBlob> {
@@ -56,7 +61,7 @@ public:
 };
 
 // Should be 10KB
-using BigBlob = std::bitset<81920>;
+typedef std::bitset<81920> BigBlob;
 
 template <>
 class Gen<BigBlob> {
@@ -71,14 +76,14 @@ public:
 };
 
 template <typename T>
-class Gen<std::shared_ptr<T> > {
+class Gen<boost::shared_ptr<T> > {
 public:
-    static std::shared_ptr<T> key(uint64_t num) {
-        return std::make_shared<T>(Gen<T>::key(num));
+    static boost::shared_ptr<T> key(uint64_t num) {
+        return boost::make_shared<T>(Gen<T>::key(num));
     }
 
-    static std::shared_ptr<T> value() {
-        return std::make_shared<T>(Gen<T>::value());
+    static boost::shared_ptr<T> value() {
+        return boost::make_shared<T>(Gen<T>::value());
     }
 };
 

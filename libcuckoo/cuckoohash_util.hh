@@ -4,31 +4,22 @@
 #define _CUCKOOHASH_UTIL_HH
 
 #include <exception>
-#include <thread>
-#include <utility>
-#include <vector>
+#include <boost/config.hpp>
+#include <boost/exception/exception.hpp>
+#include <boost/lexical_cast.hpp>
+#include <boost/thread.hpp>
 #include "cuckoohash_config.hh" // for LIBCUCKOO_DEBUG
 
 #if LIBCUCKOO_DEBUG
-//! When \ref LIBCUCKOO_DEBUG is 0, LIBCUCKOO_DBG will printing out status
-//! messages in various situations
-#  define LIBCUCKOO_DBG(fmt, ...)                                          \
-     fprintf(stderr, "\x1b[32m""[libcuckoo:%s:%d:%lu] " fmt"" "\x1b[0m",   \
-             __FILE__,__LINE__, std::hash<std::thread::id>()(std::this_thread::get_id()), \
-             __VA_ARGS__)
+#define LIBCUCKOO_DBG(fmt, ...)                                              \
+    fprintf(stderr, "\x1b[32m[libcuckoo:%s:%d:%s] " fmt "\x1b[0m", __FILE__, \
+            __LINE__,                                                        \
+            boost::lexical_cast<std::string>(boost::this_thread::get_id())   \
+                .c_str(),                                                    \
+            __VA_ARGS__)
 #else
 //! When \ref LIBCUCKOO_DEBUG is 0, LIBCUCKOO_DBG does nothing
 #  define LIBCUCKOO_DBG(fmt, ...)  do {} while (0)
-#endif
-
-/**
- * alignas() requires GCC >= 4.9, so we stick with the alignment attribute for
- * GCC.
- */
-#ifdef __GNUC__
-#define LIBCUCKOO_ALIGNAS(x) __attribute__((aligned(x)))
-#else
-#define LIBCUCKOO_ALIGNAS(x) alignas(x)
 #endif
 
 /**
@@ -41,31 +32,19 @@
 #define LIBCUCKOO_SQUELCH_PADDING_WARNING
 #endif
 
-/**
- * thread_local requires GCC >= 4.8 and is not supported in some clang versions,
- * so we use __thread if thread_local is not supported
- */
-#define LIBCUCKOO_THREAD_LOCAL thread_local
-#if defined(__clang__)
-#  if !__has_feature(cxx_thread_local)
-#    undef LIBCUCKOO_THREAD_LOCAL
-#    define LIBCUCKOO_THREAD_LOCAL __thread
-#  endif
-#elif defined(__GNUC__)
-#  if __GNUC__ == 4 && __GNUC_MINOR__ < 8
-#    undef LIBCUCKOO_THREAD_LOCAL
-#    define LIBCUCKOO_THREAD_LOCAL __thread
-#  endif
+#ifdef _MSC_VER
+#define LIBCUCKOO_THREAD_LOCAL __declspec(thread)
+#else
+#define LIBCUCKOO_THREAD_LOCAL __thread
 #endif
 
-//! For enabling certain methods based on a condition. Here's an example.
-//! ENABLE_IF(static inline, sizeof(int) == 4, int) method() {
-//!     ...
-//! }
-#define ENABLE_IF(preamble, condition, return_type)                     \
-    template <class Bogus=void*>                                        \
-    preamble typename std::enable_if<sizeof(Bogus) &&                   \
-        condition, return_type>::type
+#ifndef BOOST_NO_CXX11_FINAL
+#define LIBCUCKOO_OVERRIDE override
+#define LIBCUCKOO_FINAL final
+#else
+#define LIBCUCKOO_OVERRIDE
+#define LIBCUCKOO_FINAL
+#endif
 
 /**
  * Thrown when an automatic expansion is triggered, but the load factor of the
@@ -74,7 +53,8 @@
  * function does not properly distribute keys, or for certain adversarial
  * workloads.
  */
-class libcuckoo_load_factor_too_low : public std::exception {
+class libcuckoo_load_factor_too_low : public std::exception,
+                                      public boost::exception {
 public:
     /**
      * Constructor
@@ -87,9 +67,10 @@ public:
     /**
      * @return a descriptive error message
      */
-    virtual const char* what() const noexcept override {
+    virtual const char* what() const BOOST_NOEXCEPT_OR_NOTHROW
+        LIBCUCKOO_OVERRIDE {
         return "Automatic expansion triggered when load factor was below "
-            "minimum threshold";
+               "minimum threshold";
     }
 
     /**
@@ -107,7 +88,8 @@ private:
  * than the maximum, which can be set with the \ref
  * cuckoohash_map::maximum_hashpower method.
  */
-class libcuckoo_maximum_hashpower_exceeded : public std::exception {
+class libcuckoo_maximum_hashpower_exceeded : public std::exception,
+                                             public boost::exception {
 public:
     /**
      * Constructor
@@ -120,7 +102,8 @@ public:
     /**
      * @return a descriptive error message
      */
-    virtual const char* what() const noexcept override {
+    virtual const char* what() const BOOST_NOEXCEPT_OR_NOTHROW
+        LIBCUCKOO_OVERRIDE {
         return "Expansion beyond maximum hashpower";
     }
 

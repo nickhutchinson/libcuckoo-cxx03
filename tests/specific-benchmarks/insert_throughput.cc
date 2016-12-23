@@ -1,25 +1,23 @@
 // Tests the throughput (queries/sec) of only inserts between a specific load
 // range in a partially-filled table
 
+#include <stdint.h>
 #include <algorithm>
-#include <array>
-#include <atomic>
-#include <chrono>
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <mutex>
-#include <random>
-#include <stdint.h>
-#include <sys/time.h>
-#include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
 #include <libcuckoo/cuckoohash_map.hh>
 #include <test_util.hh>
-#include <pcg/pcg_random.hpp>
+
+#include <boost/atomic.hpp>
+#include <boost/chrono.hpp>
+#include <boost/container/vector.hpp>
+#include <boost/random.hpp>
+#include <boost/random/random_device.hpp>
+#include <boost/thread.hpp>
 
 typedef uint32_t KeyType;
 typedef std::string KeyType2;
@@ -34,7 +32,7 @@ size_t g_power = 25;
 size_t g_table_capacity = 0;
 // The number of threads spawned for inserts. This can be set with the
 // command line flag --thread-num
-size_t g_thread_num = std::thread::hardware_concurrency();
+size_t g_thread_num = boost::thread::hardware_concurrency();
 // The load factor to fill the table up to before testing throughput.
 // This can be set with the command line flag --begin-load.
 size_t g_begin_load = 0;
@@ -53,9 +51,9 @@ class InsertEnvironment {
     typedef typename T::key_type KType;
 public:
     InsertEnvironment()
-        : numkeys(1U << g_power),
+        : numkeys(1ULL << g_power),
           table(g_table_capacity ? g_table_capacity : numkeys), keys(numkeys),
-          gen(seed_source) {
+          gen(boost::random::random_device()()) {
         // Sets up the random number generator
         if (g_seed != 0) {
             std::cout << "seed = " << g_seed << std::endl;
@@ -75,10 +73,10 @@ public:
 
         // We prefill the table to g_begin_load with g_thread_num threads,
         // giving each thread enough keys to insert
-        std::vector<std::thread> threads;
+        boost::container::vector<boost::thread> threads;
         size_t keys_per_thread = numkeys * (g_begin_load / 100.0) / g_thread_num;
         for (size_t i = 0; i < g_thread_num; i++) {
-            threads.emplace_back(insert_thread<T>::func, std::ref(table),
+            threads.emplace_back(&insert_thread<T>::func, boost::ref(table),
                                  keys.begin()+i*keys_per_thread,
                                  keys.begin()+(i+1)*keys_per_thread);
         }
@@ -95,32 +93,30 @@ public:
 
     size_t numkeys;
     T table;
-    std::vector<KType> keys;
+    boost::container::vector<KType> keys;
     // RNG seed and engine.
-    pcg_extras::seed_seq_from<std::random_device> seed_source;
-    pcg64_fast gen;
+    boost::random::mt19937_64 gen;
     size_t init_size;
 };
 
 template <class T>
 void InsertThroughputTest(InsertEnvironment<T> *env) {
-    std::vector<std::thread> threads;
+    boost::container::vector<boost::thread> threads;
     size_t keys_per_thread = env->numkeys * ((g_end_load-g_begin_load) / 100.0) /
         g_thread_num;
-    timeval t1, t2;
-    gettimeofday(&t1, NULL);
+    boost::chrono::steady_clock::time_point t1, t2;
+    t1 = boost::chrono::steady_clock::now();
     for (size_t i = 0; i < g_thread_num; i++) {
         threads.emplace_back(
-            insert_thread<T>::func, std::ref(env->table),
+            &insert_thread<T>::func, boost::ref(env->table),
             env->keys.begin()+(i*keys_per_thread)+env->init_size,
             env->keys.begin()+((i+1)*keys_per_thread)+env->init_size);
     }
     for (size_t i = 0; i < threads.size(); i++) {
         threads[i].join();
     }
-    gettimeofday(&t2, NULL);
-    double elapsed_time = (t2.tv_sec - t1.tv_sec) * 1000.0; // sec to ms
-    elapsed_time += (t2.tv_usec - t1.tv_usec) / 1000.0; // us to ms
+    t2 = boost::chrono::steady_clock::now();
+    double elapsed_time = boost::chrono::duration<double>(t2 - t1).count();
     size_t num_inserts = env->table.size() - env->init_size;
     // Reports the results
     std::cout << "----------Results----------" << std::endl;
@@ -134,6 +130,9 @@ void InsertThroughputTest(InsertEnvironment<T> *env) {
 }
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    win32_disable_error_dialogs();
+#endif
     const char* args[] = {"--power", "--table-capacity", "--thread-num",
                           "--begin-load", "--end-load", "--seed"};
     size_t* arg_vars[] = {&g_power, &g_table_capacity, &g_thread_num, &g_begin_load,
@@ -167,11 +166,13 @@ int main(int argc, char** argv) {
     }
 
     if (g_use_strings) {
-        auto *env = new InsertEnvironment<cuckoohash_map<KeyType2, ValType>>;
+        InsertEnvironment<cuckoohash_map<KeyType2, ValType> >* env =
+            new InsertEnvironment<cuckoohash_map<KeyType2, ValType> >;
         InsertThroughputTest(env);
         delete env;
     } else {
-        auto *env = new InsertEnvironment<cuckoohash_map<KeyType, ValType>>;
+        InsertEnvironment<cuckoohash_map<KeyType, ValType> >* env =
+            new InsertEnvironment<cuckoohash_map<KeyType, ValType> >;
         InsertThroughputTest(env);
         delete env;
     }

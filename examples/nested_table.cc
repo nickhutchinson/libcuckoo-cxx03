@@ -8,33 +8,47 @@
 #include <utility>
 
 #include <libcuckoo/cuckoohash_map.hh>
+#include <boost/foreach.hpp>
+#include <boost/move/move.hpp>
+#include <boost/move/unique_ptr.hpp>
 
 typedef cuckoohash_map<std::string, std::string> InnerTable;
-typedef cuckoohash_map<std::string, std::unique_ptr<InnerTable>> OuterTable;
+typedef cuckoohash_map<std::string, boost::movelib::unique_ptr<InnerTable> >
+    OuterTable;
+
+struct UpdateFn1 {
+    void operator()(boost::movelib::unique_ptr<InnerTable>& innerTbl) const {
+        innerTbl->insert("nickname", "jimmy");
+        innerTbl->insert("pet", "dog");
+        innerTbl->insert("food", "bagels");
+    }
+};
+
+struct UpdateFn2 {
+    void operator()(boost::movelib::unique_ptr<InnerTable>& innerTbl) const {
+        innerTbl->insert("friend", "bob");
+        innerTbl->insert("activity", "sleeping");
+        innerTbl->insert("language", "javascript");
+    }
+};
 
 int main() {
     OuterTable tbl;
 
-    tbl.insert("bob", std::unique_ptr<InnerTable>(new InnerTable));
-    tbl.update_fn("bob", [] (std::unique_ptr<InnerTable>& innerTbl) {
-            innerTbl->insert("nickname", "jimmy");
-            innerTbl->insert("pet", "dog");
-            innerTbl->insert("food", "bagels");
-        });
+    boost::movelib::unique_ptr<InnerTable> it1(new InnerTable);
+    tbl.insert("bob", boost::move(it1));
+    tbl.update_fn("bob", UpdateFn1());
 
-    tbl.insert("jack", std::unique_ptr<InnerTable>(new InnerTable));
-    tbl.update_fn("jack", [] (std::unique_ptr<InnerTable>& innerTbl) {
-            innerTbl->insert("friend", "bob");
-            innerTbl->insert("activity", "sleeping");
-            innerTbl->insert("language", "javascript");
-        });
+    boost::movelib::unique_ptr<InnerTable> it2(new InnerTable);
+    tbl.insert("jack", boost::move(it2));
+    tbl.update_fn("jack", UpdateFn2());
 
     {
-        auto lt = tbl.lock_table();
-        for (const auto& item : lt) {
+        OuterTable::locked_table lt = tbl.lock_table();
+        BOOST_FOREACH (const OuterTable::value_type& item, lt) {
             std::cout << "Properties for " << item.first << std::endl;
-            auto innerLt = item.second->lock_table();
-            for (auto innerItem : innerLt) {
+            InnerTable::locked_table innerLt = item.second->lock_table();
+            BOOST_FOREACH (InnerTable::value_type innerItem, innerLt) {
                 std::cout << "\t" << innerItem.first << " = "
                           << innerItem.second << std::endl;
             }

@@ -15,7 +15,7 @@ public:
 TEST_CASE("caps automatic expansion", "[minimum load fator]") {
     const size_t slot_per_bucket = 4;
     cuckoohash_map<int, int, BadHashFunction, std::equal_to<int>,
-                   std::allocator<std::pair<const int, int>>,
+                   std::allocator<std::pair<const int, int> >,
                    slot_per_bucket> tbl(16);
     tbl.minimum_load_factor(0.6);
 

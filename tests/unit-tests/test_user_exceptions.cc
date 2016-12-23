@@ -1,6 +1,7 @@
 #include "catch.hpp"
 
 #include <stdexcept>
+#include <boost/functional/hash.hpp>
 
 #include "../../src/cuckoohash_map.hh"
 #include "unit_test_util.hh"
@@ -30,18 +31,18 @@ public:
         val = static_cast<size_t>(i);
     }
 
-    ExceptionInt(ExceptionInt&& i) {
+    ExceptionInt(BOOST_RV_REF(ExceptionInt) i) {
         maybeThrow(constructorThrow || moveThrow);
         val = static_cast<size_t>(i);
     }
 
-    ExceptionInt& operator=(const ExceptionInt& i) {
+    ExceptionInt& operator=(BOOST_COPY_ASSIGN_REF(ExceptionInt) i) {
         maybeThrow(constructorThrow);
         val = static_cast<size_t>(i);
         return *this;
     }
 
-    ExceptionInt& operator=(ExceptionInt&& i) {
+    ExceptionInt& operator=(BOOST_RV_REF(ExceptionInt) i) {
         maybeThrow(constructorThrow || moveThrow);
         val = static_cast<size_t>(i);
         return *this;
@@ -50,19 +51,18 @@ public:
     operator size_t() const {
         return val;
     }
+
+    friend size_t hash_value(const ExceptionInt& x) {
+        maybeThrow(hashThrow);
+        return x;
+    }
+
 private:
+    BOOST_COPYABLE_AND_MOVABLE(ExceptionInt);
     size_t val;
 };
 
 namespace std {
-    template <>
-    struct hash<ExceptionInt> {
-        size_t operator()(const ExceptionInt& x) const {
-            maybeThrow(hashThrow);
-            return x;
-        }
-    };
-
     template <>
     struct equal_to<ExceptionInt> {
         bool operator()(const ExceptionInt& lhs,
@@ -73,17 +73,24 @@ namespace std {
     };
 }
 
-typedef cuckoohash_map<ExceptionInt, size_t, std::hash<ExceptionInt>,
+typedef cuckoohash_map<ExceptionInt, size_t, boost::hash<ExceptionInt>,
                        std::equal_to<ExceptionInt> > exceptionTable;
 
 void checkIterTable(exceptionTable& tbl, size_t expectedSize) {
-    auto lockedTable = tbl.lock_table();
+    exceptionTable::locked_table lockedTable = tbl.lock_table();
     size_t actualSize = 0;
-    for (auto it = lockedTable.begin(); it != lockedTable.end(); ++it) {
+    for (exceptionTable::locked_table::iterator it = lockedTable.begin();
+         it != lockedTable.end(); ++it) {
         ++actualSize;
     }
     REQUIRE(actualSize == expectedSize);
 }
+
+struct UpdateFn {
+    void operator()(size_t& val) const {
+        val++;
+    }
+};
 
 TEST_CASE("user exceptions", "[user_exceptions]") {
     constructorThrow = hashThrow = equalityThrow = moveThrow = false;
@@ -154,14 +161,13 @@ TEST_CASE("user exceptions", "[user_exceptions]") {
         exceptionTable tbl;
         tbl.insert(9, 9);
         tbl.insert(10, 10);
-        auto updater = [](size_t& val) { val++; };
         hashThrow = true;
-        REQUIRE_THROWS_AS(tbl.update_fn(9, updater), std::runtime_error);
+        REQUIRE_THROWS_AS(tbl.update_fn(9, UpdateFn()), std::runtime_error);
         hashThrow = false;
         equalityThrow = true;
-        REQUIRE_THROWS_AS(tbl.update_fn(9, updater), std::runtime_error);
+        REQUIRE_THROWS_AS(tbl.update_fn(9, UpdateFn()), std::runtime_error);
         equalityThrow = false;
-        REQUIRE(tbl.update_fn(9, updater));
+        REQUIRE(tbl.update_fn(9, UpdateFn()));
         checkIterTable(tbl, 2);
     }
 
@@ -169,18 +175,17 @@ TEST_CASE("user exceptions", "[user_exceptions]") {
     {
         exceptionTable tbl;
         tbl.insert(9, 9);
-        auto updater = [](size_t& val) { val++; };
         hashThrow = true;
-        REQUIRE_THROWS_AS(tbl.upsert(9, updater, 10), std::runtime_error);
+        REQUIRE_THROWS_AS(tbl.upsert(9, UpdateFn(), 10), std::runtime_error);
         hashThrow = false;
         equalityThrow = true;
-        REQUIRE_THROWS_AS(tbl.upsert(9, updater, 10), std::runtime_error);
+        REQUIRE_THROWS_AS(tbl.upsert(9, UpdateFn(), 10), std::runtime_error);
         equalityThrow = false;
-        tbl.upsert(9, updater, 10);
+        tbl.upsert(9, UpdateFn(), 10);
         constructorThrow = true;
-        REQUIRE_THROWS_AS(tbl.upsert(10, updater, 10), std::runtime_error);
+        REQUIRE_THROWS_AS(tbl.upsert(10, UpdateFn(), 10), std::runtime_error);
         constructorThrow = false;
-        tbl.upsert(10, updater, 10);
+        tbl.upsert(10, UpdateFn(), 10);
         checkIterTable(tbl, 2);
     }
 
@@ -258,7 +263,7 @@ TEST_CASE("user exceptions", "[user_exceptions]") {
         exceptionTable tbl;
         REQUIRE(tbl.rehash(2));
         size_t cuckooKey = 0;
-        size_t cuckooKeyHash = std::hash<ExceptionInt>()(cuckooKey);
+        size_t cuckooKeyHash = boost::hash<ExceptionInt>()(cuckooKey);
         size_t cuckooKeyIndex = UnitTestInternalAccess::index_hash<
             exceptionTable>(4, cuckooKeyHash);
         size_t cuckooKeyPartial = UnitTestInternalAccess::partial_key<

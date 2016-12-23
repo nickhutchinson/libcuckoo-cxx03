@@ -1,5 +1,7 @@
 #include "catch.hpp"
 
+#include <boost/lexical_cast.hpp>
+
 #include "../../src/cuckoohash_map.hh"
 #include "unit_test_util.hh"
 
@@ -8,9 +10,10 @@
 template <class CuckoohashMap>
 void check_key(size_t hashpower,
                const typename CuckoohashMap::key_type& key) {
-    auto hashfn = typename CuckoohashMap::hasher();
+    typename CuckoohashMap::hasher hashfn;
     size_t hv = hashfn(key);
-    auto partial = UnitTestInternalAccess::partial_key<CuckoohashMap>(hv);
+    typename CuckoohashMap::partial_t partial =
+        UnitTestInternalAccess::partial_key<CuckoohashMap>(hv);
     size_t bucket = UnitTestInternalAccess::index_hash<CuckoohashMap>(
         hashpower, hv);
     size_t alt_bucket = UnitTestInternalAccess::alt_index<CuckoohashMap>(
@@ -33,7 +36,8 @@ TEST_CASE("int alt index works correctly", "[hash properties]") {
 TEST_CASE("string alt index works correctly", "[hash properties]") {
     for (size_t hashpower = 10; hashpower < 15; ++hashpower) {
         for (int key = 0; key < 10000; ++key) {
-            check_key<StringIntTable>(hashpower, std::to_string(key));
+            check_key<StringIntTable>(hashpower,
+                                      boost::lexical_cast<std::string>(key));
         }
     }
 }
@@ -42,7 +46,8 @@ TEST_CASE("hash with larger hashpower only adds top bits",
           "[hash properties]") {
     std::string key = "abc";
     size_t hv = StringIntTable::hasher()(key);
-    auto partial = UnitTestInternalAccess::partial_key<StringIntTable>(hv);
+    StringIntTable::partial_t partial =
+        UnitTestInternalAccess::partial_key<StringIntTable>(hv);
     for (size_t hashpower = 1; hashpower < 30; ++hashpower) {
         size_t index_bucket1 = UnitTestInternalAccess::index_hash<
             StringIntTable>(hashpower, hv);

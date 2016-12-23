@@ -5,26 +5,25 @@
 #  include "config.h"
 #endif
 
+#include <stdint.h>
 #include <algorithm>
-#include <array>
-#include <atomic>
-#include <chrono>
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <numeric>
-#include <random>
-#include <stdint.h>
-#include <sys/time.h>
-#include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
+#include <boost/atomic.hpp>
+#include <boost/bind.hpp>
+#include <boost/container/vector.hpp>
+#include <boost/random.hpp>
+#include <boost/random/random_device.hpp>
+#include <boost/ref.hpp>
+#include <boost/thread.hpp>
+
 #include "../../src/cuckoohash_map.hh"
 #include "../test_util.hh"
-#include "../pcg/pcg_random.hpp"
 
 typedef uint32_t KeyType;
 typedef std::string KeyType2;
@@ -35,7 +34,7 @@ typedef uint32_t ValType;
 size_t power = 25;
 // The number of threads spawned for inserts. This can be set with the
 // command line flag --thread-num
-size_t thread_num = std::thread::hardware_concurrency();
+size_t thread_num = boost::thread::hardware_concurrency();
 // The load factor to fill the table up to before testing throughput.
 // This can be set with the --load flag
 size_t load = 90;
@@ -54,7 +53,10 @@ class ReadEnvironment {
 public:
     // We allocate the vectors with 2^power keys.
     ReadEnvironment()
-        : numkeys(1U<<power), table(numkeys), keys(numkeys), gen(seed_source) {
+        : numkeys(1ULL << power),
+          table(numkeys),
+          keys(numkeys),
+          gen(boost::random::random_device()()) {
         // Sets up the random number generator
         if (seed == 0) {
 	  std::cout << "seed = random" << std::endl;
@@ -74,10 +76,10 @@ public:
 
         // We prefill the table to load with thread_num
         // threads, giving each thread enough keys to insert
-        std::vector<std::thread> threads;
+        boost::container::vector<boost::thread> threads;
         size_t keys_per_thread = numkeys * (load / 100.0) / thread_num;
         for (size_t i = 0; i < thread_num; i++) {
-            threads.emplace_back(insert_thread<T>::func, std::ref(table),
+            threads.emplace_back(&insert_thread<T>::func, boost::ref(table),
                                  keys.begin()+i*keys_per_thread,
                                  keys.begin()+(i+1)*keys_per_thread);
         }
@@ -95,19 +97,18 @@ public:
 
     size_t numkeys;
     T table;
-    std::vector<KType> keys;
-    pcg_extras::seed_seq_from<std::random_device> seed_source;
-    pcg64_fast gen;
+    boost::container::vector<KType> keys;
+    boost::random::mt19937_64 gen;
     size_t init_size;
 };
 
 template <class T>
 void ReadThroughputTest(ReadEnvironment<T> *env) {
-    std::vector<std::thread> threads;
+    boost::container::vector<boost::thread> threads;
     // A counter for the number of reads
-    std::atomic<size_t> counter(0);
+    boost::atomic<size_t> counter(0);
     // When set to true, it signals to the threads to stop running
-    std::atomic<bool> finished(false);
+    boost::atomic<bool> finished(false);
     // We use the first chunk of the threads to read the init_size elements that
     // are in the table and the others to read the numkeys-init_size elements
     // that aren't in the table. We proportion the number of threads based on
@@ -119,20 +120,21 @@ void ReadThroughputTest(ReadEnvironment<T> *env) {
     const size_t out_keys_per_thread = (env->numkeys - env->init_size) /
         second_threadnum;
     for (size_t i = 0; i < first_threadnum; i++) {
-        threads.emplace_back(read_thread<T>::func, std::ref(env->table),
-                             env->keys.begin() + (i*in_keys_per_thread),
-                             env->keys.begin() + ((i+1)*in_keys_per_thread),
-                             std::ref(counter), true, std::ref(finished));
+        threads.emplace_back(
+            boost::bind(&read_thread<T>::func, boost::ref(env->table),
+                        env->keys.begin() + (i * in_keys_per_thread),
+                        env->keys.begin() + ((i + 1) * in_keys_per_thread),
+                        boost::ref(counter), true, boost::ref(finished)));
     }
     for (size_t i = 0; i < second_threadnum; i++) {
-        threads.emplace_back(
-            read_thread<T>::func, std::ref(env->table),
-            env->keys.begin() + (i*out_keys_per_thread) + env->init_size,
-            env->keys.begin() + (i+1)*out_keys_per_thread + env->init_size,
-            std::ref(counter), false, std::ref(finished));
+        threads.emplace_back(boost::bind(
+            &read_thread<T>::func, boost::ref(env->table),
+            env->keys.begin() + (i * out_keys_per_thread) + env->init_size,
+            env->keys.begin() + (i + 1) * out_keys_per_thread + env->init_size,
+            boost::ref(counter), false, boost::ref(finished)));
     }
-    sleep(test_len);
-    finished.store(true, std::memory_order_release);
+    boost::this_thread::sleep_for(boost::chrono::seconds(test_len));
+    finished.store(true, boost::memory_order_release);
     for (size_t i = 0; i < threads.size(); i++) {
         threads[i].join();
     }
@@ -145,6 +147,9 @@ void ReadThroughputTest(ReadEnvironment<T> *env) {
 }
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    win32_disable_error_dialogs();
+#endif
     const char* args[] = {"--power", "--thread-num", "--load",
                           "--time", "--seed"};
     size_t* arg_vars[] = {&power, &thread_num, &load, &test_len, &seed};
@@ -165,11 +170,13 @@ int main(int argc, char** argv) {
                 flag_vars, flag_help, sizeof(flags)/sizeof(const char*));
 
     if (use_strings) {
-        auto *env = new ReadEnvironment<cuckoohash_map<KeyType2, ValType>>;
+        ReadEnvironment<cuckoohash_map<KeyType2, ValType> >* env =
+            new ReadEnvironment<cuckoohash_map<KeyType2, ValType> >;
         ReadThroughputTest(env);
         delete env;
     } else {
-        auto *env = new ReadEnvironment<cuckoohash_map<KeyType, ValType>>;
+        ReadEnvironment<cuckoohash_map<KeyType, ValType> >* env =
+            new ReadEnvironment<cuckoohash_map<KeyType, ValType> >;
         ReadThroughputTest(env);
         delete env;
     }

@@ -1,20 +1,54 @@
 #ifndef _TEST_UTIL_HH
 #define _TEST_UTIL_HH
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+#if defined(_MSC_VER)
+#include <crtdbg.h>
+#endif
 
 // Utilities for running stress tests and benchmarks
-#include <array>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
-#include <mutex>
-#include <random>
-#include "../src/cuckoohash_map.hh"
-#include "pcg/pcg_random.hpp"
 
-std::mutex print_lock;
+#include <boost/atomic.hpp>
+#include <boost/container/vector.hpp>
+#include <boost/lexical_cast.hpp>
+#include <boost/random.hpp>
+#include <boost/thread.hpp>
+
+#include "../src/cuckoohash_map.hh"
+
+#if defined(_MSC_VER) && _MSC_VER < 1800
+#define strtoull _strtoui64
+#endif  // defined(_MSC_VER) && _MSC_VER < 1800
+
+#if defined(_WIN32)
+// In debug mode, suppress the abort/retry/ignore dialog and cause the CRT to
+// raise a DebugBreak() instead. See:
+// http://msdn.microsoft.com/en-us/library/8hyw4sy7(v=vs.71).aspx
+static int win32_crt_debug_hook(int /*type*/, char* /*message*/,
+                                int* returnValue) {
+    *returnValue = 1;
+    return TRUE;
+}
+
+inline void win32_disable_error_dialogs() {
+    // Disable UI for various classes of errors from Win32.
+    ::SetErrorMode(GetErrorMode() | SEM_FAILCRITICALERRORS |
+                   SEM_NOOPENFILEERRORBOX);
+#if defined(_MSC_VER)
+    // Disable UI for assertion failures from the CRT in debug mode.
+    _CrtSetReportHook(win32_crt_debug_hook);
+#endif
+}
+#endif  // _WIN32
+
+boost::mutex print_lock;
 int main_return_value = EXIT_SUCCESS;
-typedef std::lock_guard<std::mutex> mutex_guard;
+typedef boost::lock_guard<boost::mutex> mutex_guard;
 
 // Prints a message if the two items aren't equal
 template <class T, class U>
@@ -152,7 +186,7 @@ T generateKey(size_t i) {
 template <>
 std::string generateKey<std::string>(size_t n) {
     const size_t min_length = 100;
-    const std::string num(std::to_string(n));
+    const std::string num(boost::lexical_cast<std::string>(n));
     if (num.size() >= min_length) {
         return num;
     }
@@ -169,7 +203,9 @@ std::string generateKey<std::string>(size_t n) {
 template <class Table>
 class insert_thread {
 public:
-    typedef typename std::vector<typename Table::key_type>::iterator it_t;
+    typedef
+        typename boost::container::vector<typename Table::key_type>::iterator
+            it_t;
     static void func(Table& table, it_t begin, it_t end) {
         for (;begin != end; begin++) {
             ASSERT_TRUE(table.insert(*begin, 0));
@@ -184,17 +220,19 @@ public:
 template <class Table>
 class read_thread {
 public:
-    typedef typename std::vector<typename Table::key_type>::iterator it_t;
+    typedef
+        typename boost::container::vector<typename Table::key_type>::iterator
+            it_t;
     static void func(Table& table, it_t begin, it_t end,
-                     std::atomic<size_t>& counter, bool in_table,
-                     std::atomic<bool>& finished) {
+                     boost::atomic<size_t>& counter, bool in_table,
+                     boost::atomic<bool>& finished) {
         typename Table::mapped_type v;
         // We keep track of our own local counter for reads, to avoid
         // over-burdening the shared atomic counter
         size_t reads = 0;
-        while (!finished.load(std::memory_order_acquire)) {
-            for (auto it = begin; it != end; it++) {
-                if (finished.load(std::memory_order_acquire)) {
+        while (!finished.load(boost::memory_order_acquire)) {
+            for (it_t it = begin; it != end; it++) {
+                if (finished.load(boost::memory_order_acquire)) {
                     counter.fetch_add(reads);
                     return;
                 }
@@ -211,15 +249,17 @@ public:
 template <class Table>
 class read_insert_thread {
 public:
-    typedef typename std::vector<typename Table::key_type>::iterator it_t;
+    typedef
+        typename boost::container::vector<typename Table::key_type>::iterator
+            it_t;
     static void func(Table& table, it_t begin, it_t end,
-                     std::atomic<size_t>& counter, const double insert_prob,
+                     boost::atomic<size_t>& counter, const double insert_prob,
                      const size_t start_seed) {
         typename Table::mapped_type v;
-        pcg64_fast gen(start_seed);
-        std::uniform_real_distribution<double> dist(0.0, 1.0);
-        auto inserter_it = begin;
-        auto reader_it = begin;
+        boost::random::mt19937_64 gen(start_seed);
+        boost::random::uniform_real_distribution<double> dist(0.0, 1.0);
+        it_t inserter_it = begin;
+        it_t reader_it = begin;
         size_t ops = 0;
         while (inserter_it != end) {
             if (dist(gen) < insert_prob) {

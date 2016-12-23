@@ -3,26 +3,28 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
-#include <thread>
 #include <utility>
+
+#include <boost/lexical_cast.hpp>
+#include <boost/thread.hpp>
 
 #include "../../src/cuckoohash_map.hh"
 #include "unit_test_util.hh"
 
 TEST_CASE("bracket find empty table", "[bracket]") {
     IntIntTable table;
-    auto ref = table[10];
+    IntIntTable::reference ref = table[10];
     REQUIRE_THROWS_AS((void) ((int) ref), std::out_of_range);
 }
 
 TEST_CASE("bracket find filled table", "[bracket]") {
     StringIntTable table;
     for (int i = 0; i < 10; ++i) {
-        table.insert(std::to_string(i), i);
+        table.insert(boost::lexical_cast<std::string>(i), i);
     }
 
     for (int i = 0; i < 10; ++i) {
-        REQUIRE(table[std::to_string(i)] == i);
+        REQUIRE(table[boost::lexical_cast<std::string>(i)] == i);
     }
 }
 

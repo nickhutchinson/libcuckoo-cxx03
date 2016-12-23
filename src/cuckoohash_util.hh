@@ -4,27 +4,26 @@
 #define _CUCKOOHASH_UTIL_HH
 
 #include <exception>
-#include <thread>
-#include <vector>
-#include "cuckoohash_config.hh" // for LIBCUCKOO_DEBUG
+
+#include <boost/config.hpp>
+#include <boost/container/allocator_traits.hpp>
+#include <boost/container/vector.hpp>
+#include <boost/exception/exception.hpp>
+#include <boost/foreach.hpp>
+#include <boost/lexical_cast.hpp>
+#include <boost/thread.hpp>
+
+#include "cuckoohash_config.hh"  // for LIBCUCKOO_DEBUG
 
 #if LIBCUCKOO_DEBUG
-#  define LIBCUCKOO_DBG(fmt, ...)                                          \
-     fprintf(stderr, "\x1b[32m""[libcuckoo:%s:%d:%lu] " fmt"" "\x1b[0m",   \
-             __FILE__,__LINE__, (unsigned long)std::this_thread::get_id(), \
-             __VA_ARGS__)
+#define LIBCUCKOO_DBG(fmt, ...)                                              \
+    fprintf(stderr, "\x1b[32m[libcuckoo:%s:%d:%s] " fmt "\x1b[0m", __FILE__, \
+            __LINE__,                                                        \
+            boost::lexical_cast<std::string>(boost::this_thread::get_id())   \
+                .c_str(),                                                    \
+            __VA_ARGS__)
 #else
 #  define LIBCUCKOO_DBG(fmt, ...)  do {} while (0)
-#endif
-
-/**
- * alignas() requires GCC >= 4.9, so we stick with the alignment attribute for
- * GCC.
- */
-#ifdef __GNUC__
-#define LIBCUCKOO_ALIGNAS(x) __attribute__((aligned(x)))
-#else
-#define LIBCUCKOO_ALIGNAS(x) alignas(x)
 #endif
 
 /**
@@ -37,31 +36,19 @@
 #define LIBCUCKOO_SQUELCH_PADDING_WARNING
 #endif
 
-/**
- * thread_local requires GCC >= 4.8 and is not supported in some clang versions,
- * so we use __thread if thread_local is not supported
- */
-#define LIBCUCKOO_THREAD_LOCAL thread_local
-#if defined(__clang__)
-#  if !__has_feature(cxx_thread_local)
-#    undef LIBCUCKOO_THREAD_LOCAL
-#    define LIBCUCKOO_THREAD_LOCAL __thread
-#  endif
-#elif defined(__GNUC__)
-#  if __GNUC__ == 4 && __GNUC_MINOR__ < 8
-#    undef LIBCUCKOO_THREAD_LOCAL
-#    define LIBCUCKOO_THREAD_LOCAL __thread
-#  endif
+#ifdef _MSC_VER
+#define LIBCUCKOO_THREAD_LOCAL __declspec(thread)
+#else
+#define LIBCUCKOO_THREAD_LOCAL __thread
 #endif
 
-// For enabling certain methods based on a condition. Here's an example.
-// ENABLE_IF(some_cond, type, static, inline) method() {
-//     ...
-// }
-#define ENABLE_IF(preamble, condition, return_type)                     \
-    template <class Bogus=void*>                                        \
-    preamble typename std::enable_if<sizeof(Bogus) &&                   \
-        condition, return_type>::type
+#ifndef BOOST_NO_CXX11_FINAL
+#define LIBCUCKOO_OVERRIDE override
+#define LIBCUCKOO_FINAL final
+#else
+#define LIBCUCKOO_OVERRIDE
+#define LIBCUCKOO_FINAL
+#endif
 
 /**
  * Thrown when an automatic expansion is triggered, but the load factor of the
@@ -70,7 +57,8 @@
  * function does not properly distribute keys, or for certain adversarial
  * workloads.
  */
-class libcuckoo_load_factor_too_low : public std::exception {
+class libcuckoo_load_factor_too_low : public std::exception,
+                                      public boost::exception {
 public:
     /**
      * Constructor
@@ -80,9 +68,10 @@ public:
     libcuckoo_load_factor_too_low(const double lf)
         : load_factor_(lf) {}
 
-    virtual const char* what() const noexcept override {
+    virtual const char* what() const BOOST_NOEXCEPT_OR_NOTHROW
+        LIBCUCKOO_OVERRIDE {
         return "Automatic expansion triggered when load factor was below "
-            "minimum threshold";
+               "minimum threshold";
     }
 
     /**
@@ -100,7 +89,8 @@ private:
  * than the maximum, which can be set with the \ref
  * cuckoohash_map::maximum_hashpower method.
  */
-class libcuckoo_maximum_hashpower_exceeded : public std::exception {
+class libcuckoo_maximum_hashpower_exceeded : public std::exception,
+                                             public boost::exception {
 public:
     /**
      * Constructor
@@ -110,7 +100,8 @@ public:
     libcuckoo_maximum_hashpower_exceeded(const size_t hp)
         : hashpower_(hp) {}
 
-    virtual const char* what() const noexcept override {
+    virtual const char* what() const BOOST_NOEXCEPT_OR_NOTHROW
+        LIBCUCKOO_OVERRIDE {
         return "Expansion beyond maximum hashpower";
     }
 
@@ -128,20 +119,21 @@ private:
 // the 0-argument constructor
 template <class T, class Alloc>
 T* create_array(const size_t size) {
+    typedef boost::container::allocator_traits<Alloc> traits;
     Alloc allocator;
-    T* arr = allocator.allocate(size);
+    T* arr = traits::allocate(allocator, size);
     // Initialize all the elements, safely deallocating and destroying
     // everything in case of error.
     size_t i;
     try {
         for (i = 0; i < size; ++i) {
-            allocator.construct(&arr[i]);
+            traits::construct(allocator, &arr[i]);
         }
     } catch (...) {
         for (size_t j = 0; j < i; ++j) {
-            allocator.destroy(&arr[j]);
+            traits::destroy(allocator, &arr[j]);
         }
-        allocator.deallocate(arr, size);
+        traits::deallocate(allocator, arr, size);
         throw;
     }
     return arr;
@@ -151,11 +143,12 @@ T* create_array(const size_t size) {
 // memory.
 template <class T, class Alloc>
 void destroy_array(T* arr, const size_t size) {
+    typedef boost::container::allocator_traits<Alloc> traits;
     Alloc allocator;
     for (size_t i = 0; i < size; ++i) {
-        allocator.destroy(&arr[i]);
+        traits::destroy(allocator, &arr[i]);
     }
-    allocator.deallocate(arr, size);
+    traits::deallocate(allocator, arr, size);
 }
 
 // executes the function over the given range split over num_threads threads
@@ -163,21 +156,21 @@ template <class F>
 static void parallel_exec(size_t start, size_t end,
                           size_t num_threads, F func) {
     const size_t work_per_thread = (end - start) / num_threads;
-    std::vector<std::thread> threads(num_threads);
-    std::vector<std::exception_ptr> eptrs(num_threads, nullptr);
+    boost::container::vector<boost::thread> threads(num_threads);
+    boost::container::vector<boost::exception_ptr> eptrs(num_threads);
     for (size_t i = 0; i < num_threads - 1; ++i) {
-        threads[i] = std::thread(func, start, start + work_per_thread,
-                                 std::ref(eptrs[i]));
+        threads[i] = boost::thread(func, start, start + work_per_thread,
+                                   boost::ref(eptrs[i]));
         start += work_per_thread;
     }
-    threads[num_threads - 1] = std::thread(
-        func, start, end, std::ref(eptrs[num_threads - 1]));
-    for (std::thread& t : threads) {
+    threads[num_threads - 1] =
+        boost::thread(func, start, end, boost::ref(eptrs[num_threads - 1]));
+    BOOST_FOREACH (boost::thread& t, threads) {
         t.join();
     }
-    for (std::exception_ptr& eptr : eptrs) {
+    BOOST_FOREACH (boost::exception_ptr& eptr, eptrs) {
         if (eptr) {
-            std::rethrow_exception(eptr);
+            boost::rethrow_exception(eptr);
         }
     }
 }

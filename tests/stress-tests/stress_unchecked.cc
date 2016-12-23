@@ -6,25 +6,25 @@
 #  include "config.h"
 #endif
 
+#include <stdint.h>
+
 #include <algorithm>
-#include <array>
-#include <atomic>
-#include <chrono>
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <mutex>
-#include <random>
-#include <stdint.h>
-#include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
+
+#include <boost/atomic.hpp>
+#include <boost/chrono.hpp>
+#include <boost/container/vector.hpp>
+#include <boost/foreach.hpp>
+#include <boost/random.hpp>
+#include <boost/thread.hpp>
 
 #include "../../src/cuckoohash_config.hh"
 #include "../../src/cuckoohash_map.hh"
 #include "../test_util.hh"
-#include "../pcg/pcg_random.hpp"
 
 typedef uint32_t KeyType;
 typedef std::string KeyType2;
@@ -77,7 +77,8 @@ public:
     AllEnvironment() : table(numkeys), table2(numkeys), finished(false) {
         // Sets up the random number generator
         if (seed == 0) {
-            seed = std::chrono::system_clock::now().time_since_epoch().count();
+            seed =
+                boost::chrono::system_clock::now().time_since_epoch().count();
         }
         std::cout << "seed = " << seed << std::endl;
         gen_seed = seed;
@@ -86,15 +87,15 @@ public:
     cuckoohash_map<KType, ValType> table;
     cuckoohash_map<KType, ValType2> table2;
     size_t gen_seed;
-    std::atomic<bool> finished;
+    boost::atomic<bool> finished;
 };
 
 template <class KType>
 void stress_insert_thread(AllEnvironment<KType> *env, size_t thread_seed) {
-    std::uniform_int_distribution<size_t> ind_dist;
-    std::uniform_int_distribution<ValType> val_dist;
-    std::uniform_int_distribution<ValType2> val_dist2;
-    pcg64_fast gen(thread_seed);
+    boost::random::uniform_int_distribution<size_t> ind_dist;
+    boost::random::uniform_int_distribution<ValType> val_dist;
+    boost::random::uniform_int_distribution<ValType2> val_dist2;
+    boost::random::mt19937_64 gen(thread_seed);
     while (!env->finished.load()) {
         // Insert a random key into the table
         KType k = generateKey<KType>(ind_dist(gen));
@@ -106,8 +107,8 @@ void stress_insert_thread(AllEnvironment<KType> *env, size_t thread_seed) {
 
 template <class KType>
 void delete_thread(AllEnvironment<KType> *env, size_t thread_seed) {
-    std::uniform_int_distribution<size_t> ind_dist;
-    pcg64_fast gen(thread_seed);
+    boost::random::uniform_int_distribution<size_t> ind_dist;
+    boost::random::mt19937_64 gen(thread_seed);
     while (!env->finished.load()) {
         // Run deletes on a random key.
         const KType k = generateKey<KType>(ind_dist(gen));
@@ -116,14 +117,21 @@ void delete_thread(AllEnvironment<KType> *env, size_t thread_seed) {
     }
 }
 
+template <typename ValType, ValType Delta>
+struct UpdateFn {
+    void operator()(ValType& v) {
+        v += Delta;
+    }
+};
+
 template <class KType>
 void update_thread(AllEnvironment<KType> *env, size_t thread_seed) {
-    std::uniform_int_distribution<size_t> ind_dist;
-    std::uniform_int_distribution<ValType> val_dist;
-    std::uniform_int_distribution<ValType2> val_dist2;
-    std::uniform_int_distribution<size_t> third(0, 2);
-    pcg64_fast gen(thread_seed);
-    auto updatefn = [](ValType& v) { v += 3; };
+    boost::random::uniform_int_distribution<size_t> ind_dist;
+    boost::random::uniform_int_distribution<ValType> val_dist;
+    boost::random::uniform_int_distribution<ValType2> val_dist2;
+    boost::random::uniform_int_distribution<size_t> third(0, 2);
+    boost::random::mt19937_64 gen(thread_seed);
+    UpdateFn<ValType, 3> updatefn;
     while (!env->finished.load()) {
         // Run updates, update_funcs, or upserts on a random key.
         const KType k = generateKey<KType>(ind_dist(gen));
@@ -136,22 +144,19 @@ void update_thread(AllEnvironment<KType> *env, size_t thread_seed) {
         case 1:
             // update_fn
             env->table.update_fn(k, updatefn);
-            env->table2.update_fn(
-                k, [](ValType2& v) { v += 10; });
+            env->table2.update_fn(k, UpdateFn<ValType2, 10>());
             break;
         case 2:
             env->table.upsert(k, updatefn, val_dist(gen));
-            env->table2.upsert(
-                k, [](ValType2& v) { v -= 50; },
-                val_dist2(gen));
+            env->table2.upsert(k, UpdateFn<ValType2, -50>(), val_dist2(gen));
         }
     }
 }
 
 template <class KType>
 void find_thread(AllEnvironment<KType> *env, size_t thread_seed) {
-    std::uniform_int_distribution<size_t> ind_dist;
-    pcg64_fast gen(thread_seed);
+    boost::random::uniform_int_distribution<size_t> ind_dist;
+    boost::random::mt19937_64 gen(thread_seed);
     ValType v;
     while (!env->finished.load()) {
         // Run finds on a random key.
@@ -165,10 +170,10 @@ void find_thread(AllEnvironment<KType> *env, size_t thread_seed) {
 
 template <class KType>
 void resize_thread(AllEnvironment<KType> *env, size_t thread_seed) {
-    pcg64_fast gen(thread_seed);
+    boost::random::mt19937_64 gen(thread_seed);
     // Resizes at a random time
     const size_t sleep_time = gen() % test_len;
-    sleep(sleep_time);
+    boost::this_thread::sleep_for(boost::chrono::seconds(sleep_time));
     if (env->finished.load()) {
         return;
     }
@@ -177,22 +182,23 @@ void resize_thread(AllEnvironment<KType> *env, size_t thread_seed) {
         env->table.rehash(hashpower + 1);
         env->table.rehash(hashpower / 2);
     } else {
-        env->table2.reserve((1U << (hashpower+1)) * DEFAULT_SLOT_PER_BUCKET);
-        env->table2.reserve((1U << hashpower) * DEFAULT_SLOT_PER_BUCKET);
+        env->table2.reserve((1ULL << (hashpower+1)) * DEFAULT_SLOT_PER_BUCKET);
+        env->table2.reserve((1ULL << hashpower) * DEFAULT_SLOT_PER_BUCKET);
     }
 }
 
 template <class KType>
 void iterator_thread(AllEnvironment<KType> *env, size_t thread_seed) {
-    pcg64_fast gen(thread_seed);
+    boost::random::mt19937_64 gen(thread_seed);
     // Runs an iteration operation at a random time
     const size_t sleep_time = gen() % test_len;
-    sleep(sleep_time);
+    boost::this_thread::sleep_for(boost::chrono::seconds(sleep_time));
     if (env->finished.load()) {
         return;
     }
-    auto lt = env->table2.lock_table();
-    for (auto& item : lt) {
+    typedef cuckoohash_map<KType, ValType2> table_t;
+    typename table_t::locked_table lt = env->table2.lock_table();
+    BOOST_FOREACH (typename table_t::value_type &item, lt) {
         if (gen() & 1) {
             item.second++;
         }
@@ -202,7 +208,7 @@ void iterator_thread(AllEnvironment<KType> *env, size_t thread_seed) {
 template <class KType>
 void misc_thread(AllEnvironment<KType> *env) {
     // Runs all the misc functions
-    pcg64_fast gen(seed);
+    boost::random::mt19937_64 gen(seed);
     while (!env->finished.load()) {
         env->table.size();
         env->table.empty();
@@ -215,10 +221,10 @@ void misc_thread(AllEnvironment<KType> *env) {
 
 template <class KType>
 void clear_thread(AllEnvironment<KType> *env, size_t thread_seed) {
-    pcg64_fast gen(thread_seed);
+    boost::random::mt19937_64 gen(thread_seed);
     // Runs a clear operation at a random time
     const size_t sleep_time = gen() % test_len;
-    sleep(sleep_time);
+    boost::this_thread::sleep_for(boost::chrono::seconds(sleep_time));
     if (env->finished.load()) {
         return;
     }
@@ -228,36 +234,44 @@ void clear_thread(AllEnvironment<KType> *env, size_t thread_seed) {
 // Spawns thread_num threads for each type of operation
 template <class KType>
 void StressTest(AllEnvironment<KType> *env) {
-    std::vector<std::thread> threads;
+    boost::container::vector<boost::thread> threads;
     for (size_t i = 0; i < thread_num; i++) {
         if (!disable_inserts) {
-            threads.emplace_back(stress_insert_thread<KType>, env,
-                                 env->gen_seed++);
+            void (*f)(AllEnvironment<KType> *, size_t) =
+                stress_insert_thread<KType>;
+            threads.emplace_back(f, env, env->gen_seed++);
         }
         if (!disable_deletes) {
-            threads.emplace_back(delete_thread<KType>, env, env->gen_seed++);
+            void (*f)(AllEnvironment<KType> *, size_t) = delete_thread<KType>;
+            threads.emplace_back(f, env, env->gen_seed++);
         }
         if (!disable_updates) {
-            threads.emplace_back(update_thread<KType>, env, env->gen_seed++);
+            void (*f)(AllEnvironment<KType> *, size_t) = update_thread<KType>;
+            threads.emplace_back(f, env, env->gen_seed++);
         }
         if (!disable_finds) {
-            threads.emplace_back(find_thread<KType>, env, env->gen_seed++);
+            void (*f)(AllEnvironment<KType> *, size_t) = find_thread<KType>;
+            threads.emplace_back(f, env, env->gen_seed++);
         }
         if (!disable_resizes) {
-            threads.emplace_back(resize_thread<KType>, env, env->gen_seed++);
+            void (*f)(AllEnvironment<KType> *, size_t) = resize_thread<KType>;
+            threads.emplace_back(f, env, env->gen_seed++);
         }
         if (!disable_iterators) {
-            threads.emplace_back(iterator_thread<KType>, env, env->gen_seed++);
+            void (*f)(AllEnvironment<KType> *, size_t) = iterator_thread<KType>;
+            threads.emplace_back(f, env, env->gen_seed++);
         }
         if (!disable_misc) {
-            threads.emplace_back(misc_thread<KType>, env);
+            void (*f)(AllEnvironment<KType> *) = misc_thread<KType>;
+            threads.emplace_back(f, env);
         }
         if (!disable_clears) {
-            threads.emplace_back(clear_thread<KType>, env, env->gen_seed++);
+            void (*f)(AllEnvironment<KType> *, size_t) = clear_thread<KType>;
+            threads.emplace_back(f, env, env->gen_seed++);
         }
     }
     // Sleeps before ending the threads
-    sleep(test_len);
+    boost::this_thread::sleep_for(boost::chrono::seconds(test_len));
     env->finished.store(true);
     for (size_t i = 0; i < threads.size(); i++) {
         threads[i].join();
@@ -268,6 +282,9 @@ void StressTest(AllEnvironment<KType> *env) {
 }
 
 int main(int argc, char** argv) {
+#ifdef _WIN32
+    win32_disable_error_dialogs();
+#endif
     const char* args[] = {"--power", "--thread-num", "--time", "--seed"};
     size_t* arg_vars[] = {&power, &thread_num, &test_len, &seed};
     const char* arg_help[] = {
@@ -298,14 +315,14 @@ int main(int argc, char** argv) {
     parse_flags(argc, argv, "Runs a stress test on inserts, deletes, and finds",
                 args, arg_vars, arg_help, sizeof(args)/sizeof(const char*),
                 flags, flag_vars, flag_help, sizeof(flags)/sizeof(const char*));
-    numkeys = 1U << power;
+    numkeys = 1ULL << power;
 
     if (use_strings) {
-        auto *env = new AllEnvironment<KeyType2>;
+        AllEnvironment<KeyType2> *env = new AllEnvironment<KeyType2>;
         StressTest(env);
         delete env;
     } else {
-        auto *env = new AllEnvironment<KeyType>;
+        AllEnvironment<KeyType> *env = new AllEnvironment<KeyType>;
         StressTest(env);
         delete env;
     }

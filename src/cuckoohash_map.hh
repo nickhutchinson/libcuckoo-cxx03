@@ -146,7 +146,7 @@ public:
 
     typedef const mapped_type const_reference;
 
-    typedef char partial_t;
+    typedef uint8_t partial_t;
 
 private:
     // Constants used internally

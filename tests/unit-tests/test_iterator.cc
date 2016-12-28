@@ -61,14 +61,8 @@ TEST_CASE("iterator release", "[iterator]") {
     }
 
     SECTION("release through destructor") {
-        IntIntTable::locked_table lt = table.lock_table();
-        IntIntTable::locked_table::iterator it = lt.begin();
-        lt.IntIntTable::locked_table::~locked_table();
+        IntIntTable::locked_table::iterator it = table.lock_table().begin();
         AssertIteratorIsReleased(it);
-        AssertLockedTableIsReleased(lt);
-        lt.release();
-        AssertIteratorIsReleased(it);
-        AssertLockedTableIsReleased(lt);
     }
 
     SECTION("released iterator equality") {

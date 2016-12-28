@@ -4,6 +4,7 @@ project(libcuckoo LANGUAGES CXX)
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 98)
+add_definitions(-DCATCH_CONFIG_NO_CPP11)
 
 if (MSVC)
   string(REGEX REPLACE "[-/]W[1-4]" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")

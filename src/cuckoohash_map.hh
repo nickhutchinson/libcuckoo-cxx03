@@ -1895,7 +1895,7 @@ private:
         // reading from the buckets array. Then the old buckets array will be
         // deleted when new_map is deleted. All the locks should be released by
         // the unlocker as well.
-        std::swap(buckets_, new_map.buckets_);
+        boost::adl_move_swap(buckets_, new_map.buckets_);
         set_hashpower(new_map.hashpower_);
         return ok;
     }

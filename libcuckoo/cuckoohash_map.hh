@@ -317,10 +317,10 @@ private:
     BOOST_STATIC_ASSERT_MSG(
         LOCK_ARRAY_GRANULARITY >= 0 && LOCK_ARRAY_GRANULARITY <= 16,
         "LOCK_ARRAY_GRANULARITY constant must be between 0 and 16, inclusive");
-    typedef lazy_array<16 - LOCK_ARRAY_GRANULARITY, LOCK_ARRAY_GRANULARITY,
-                       spinlock,
-                       typename boost::container::allocator_traits<
-                           allocator_type>::template rebind_alloc<spinlock> >
+    typedef lazy_array<
+        16 - LOCK_ARRAY_GRANULARITY, LOCK_ARRAY_GRANULARITY, spinlock,
+        libcuckoo_aligned_allocator<typename boost::container::allocator_traits<
+            allocator_type>::template rebind_alloc<spinlock> > >
         locks_t;
 
     // The type of the expansion lock

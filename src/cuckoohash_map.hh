@@ -315,10 +315,10 @@ private:
     BOOST_STATIC_ASSERT_MSG(
         LOCK_ARRAY_GRANULARITY >= 0 && LOCK_ARRAY_GRANULARITY <= 16,
         "LOCK_ARRAY_GRANULARITY constant must be between 0 and 16, inclusive");
-    typedef lazy_array<16 - LOCK_ARRAY_GRANULARITY, LOCK_ARRAY_GRANULARITY,
-                       spinlock,
-                       typename boost::container::allocator_traits<
-                           allocator_type>::template rebind_alloc<spinlock> >
+    typedef lazy_array<
+        16 - LOCK_ARRAY_GRANULARITY, LOCK_ARRAY_GRANULARITY, spinlock,
+        libcuckoo_aligned_allocator<typename boost::container::allocator_traits<
+            allocator_type>::template rebind_alloc<spinlock> > >
         locks_t;
 
     // The type of the expansion lock
@@ -409,23 +409,37 @@ public:
         buckets_.resize(hashsize(hp));
         locks_.allocate(std::min(locks_t::size(), hashsize(hp)));
 
-        typedef typename boost::container::allocator_traits<
-            Alloc>::template rebind_alloc<cacheint>
-            cacheint_alloc;
-        num_inserts_ = create_array<cacheint, cacheint_alloc>(kNumCores());
-        num_deletes_ = create_array<cacheint, cacheint_alloc>(kNumCores());
+        typedef boost::container::allocator_traits<libcuckoo_aligned_allocator<
+            typename boost::container::allocator_traits<
+                Alloc>::template rebind_alloc<cacheint> > >
+            traits_t;
+        typename traits_t::allocator_type alloc;
+
+        num_inserts_ = traits_t::allocate(alloc, kNumCores());
+        num_deletes_ = traits_t::allocate(alloc, kNumCores());
+
+        for (size_t i = 0; i < kNumCores(); ++i) {
+            traits_t::construct(alloc, &num_inserts_[i]);
+            traits_t::construct(alloc, &num_deletes_[i]);
+        }
     }
 
     ~cuckoohash_map() {
         cuckoo_clear();
 
-        typedef typename boost::container::allocator_traits<
-            Alloc>::template rebind_alloc<cacheint>
-            cacheint_alloc;
-        if (num_inserts_)
-            destroy_array<cacheint, cacheint_alloc>(num_inserts_, kNumCores());
-        if (num_deletes_)
-            destroy_array<cacheint, cacheint_alloc>(num_deletes_, kNumCores());
+        typedef boost::container::allocator_traits<libcuckoo_aligned_allocator<
+            typename boost::container::allocator_traits<
+                Alloc>::template rebind_alloc<cacheint> > >
+            traits_t;
+        typename traits_t::allocator_type alloc;
+
+        for (size_t i = 0; i < kNumCores(); ++i) {
+            traits_t::destroy(alloc, &num_inserts_[i]);
+            traits_t::destroy(alloc, &num_deletes_[i]);
+        }
+
+        traits_t::deallocate(alloc, num_inserts_, kNumCores());
+        traits_t::deallocate(alloc, num_deletes_, kNumCores());
     }
 
     //! clear removes all the elements in the hash table, calling their

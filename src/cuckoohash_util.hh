@@ -5,6 +5,8 @@
 
 #include <exception>
 
+#include <boost/align/align.hpp>
+#include <boost/align/alignment_of.hpp>
 #include <boost/config.hpp>
 #include <boost/container/allocator_traits.hpp>
 #include <boost/container/vector.hpp>
@@ -175,4 +177,60 @@ static void parallel_exec(size_t start, size_t end,
     }
 }
 
+template <typename Alloc,
+          size_t Alignment =
+              boost::alignment::alignment_of<typename Alloc::value_type>::value>
+class libcuckoo_aligned_allocator {
+public:
+    typedef typename Alloc::value_type value_type;
+
+    template <typename U>
+    struct rebind {
+        typedef libcuckoo_aligned_allocator<U, Alignment> other;
+    };
+
+    libcuckoo_aligned_allocator() {}
+    libcuckoo_aligned_allocator(const libcuckoo_aligned_allocator&) {}
+
+    template <typename U>
+    libcuckoo_aligned_allocator(
+        const libcuckoo_aligned_allocator<U, Alignment>&) {}
+
+    value_type* allocate(size_t n) const {
+        typedef typename boost::container::allocator_traits<
+            Alloc>::template rebind_traits<char>
+            traits_t;
+        typename traits_t::allocator_type alloc;
+
+        const size_t size = n * sizeof(value_type);
+        size_t paddedSize = size + Alignment - 1;
+
+        char* base = traits_t::allocate(alloc, sizeof(char*) + paddedSize);
+        void* p = base + sizeof(char*);
+        boost::alignment::align(Alignment, size, p, paddedSize);
+        *(static_cast<char**>(p) - 1) = base;
+        return static_cast<value_type*>(p);
+    }
+
+    void deallocate(value_type* p, size_t n) const {
+        typedef typename boost::container::allocator_traits<
+            Alloc>::template rebind_traits<char>
+            traits_t;
+        typename traits_t::allocator_type alloc;
+
+        traits_t::deallocate(
+            alloc, *(reinterpret_cast<char**>(p) - 1),
+            sizeof(char*) + n * sizeof(value_type) + Alignment - 1);
+    }
+
+    friend bool operator==(const libcuckoo_aligned_allocator&,
+                           const libcuckoo_aligned_allocator&) {
+        return true;
+    }
+
+    friend bool operator!=(const libcuckoo_aligned_allocator&,
+                           const libcuckoo_aligned_allocator&) {
+        return false;
+    }
+};
 #endif // _CUCKOOHASH_UTIL_HH

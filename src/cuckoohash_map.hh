@@ -238,7 +238,8 @@ private:
         }
 
         template <typename K, typename... Args>
-        void setKV(size_t ind, K&& k, Args&&... args) {
+        void setKV(size_t ind, partial_t p, K&& k, Args&&... args) {
+            partial(ind) = p;
             static allocator_type pair_allocator;
             occupied_[ind] = true;
             pair_allocator.construct(
@@ -268,10 +269,9 @@ private:
             assert(b1.occupied(slot1));
             assert(!b2.occupied(slot2));
             storage_value_type& tomove = b1.storage_kvpair(slot1);
-            b2.setKV(slot2, std::move(tomove.first), std::move(tomove.second));
-            b2.partial(slot2) = b1.partial(slot1);
-            b1.occupied_.reset(slot1);
-            b2.occupied_.set(slot2);
+            b2.setKV(slot2, b1.partial(slot1),
+                     std::move(tomove.first), std::move(tomove.second));
+            b1.eraseKV(slot1);
         }
     };
 
@@ -1318,8 +1318,7 @@ private:
     void add_to_bucket(const partial_t partial, Bucket& b,
                        const size_t slot, K&& key, Args&&... val) {
         assert(!b.occupied(slot));
-        b.partial(slot) = partial;
-        b.setKV(slot, std::forward<K>(key), std::forward<Args>(val)...);
+        b.setKV(slot, partial, std::forward<K>(key), std::forward<Args>(val)...);
         num_inserts_[get_counterid()].num.fetch_add(
             1, std::memory_order_relaxed);
     }

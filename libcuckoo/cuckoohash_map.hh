@@ -181,7 +181,7 @@ private:
         boost::atomic_flag lock_;
 
     public:
-        size_t elems_in_buckets;
+        boost::atomic<size_t> elems_in_buckets;
 
         spinlock() : elems_in_buckets(0) {
             lock_.clear();
@@ -1393,7 +1393,7 @@ private:
         assert(!b.occupied(slot));
         b.setKV(slot, partial, boost::forward<K>(key),
                 boost::forward<V>(val));
-        ++locks_[lock_ind(bucket_ind)].elems_in_buckets;
+        nonatomic_inc(&locks_[lock_ind(bucket_ind)].elems_in_buckets);
     }
 
     // try_find_insert_bucket will search the bucket and store the index of an
@@ -1441,7 +1441,7 @@ private:
             }
             if (key_eq()(b.key(i), key)) {
                 b.eraseKV(i);
-                --locks_[lock_ind(bucket_ind)].elems_in_buckets;
+                nonatomic_dec(&locks_[lock_ind(bucket_ind)].elems_in_buckets);
                 return true;
             }
         }
@@ -1684,7 +1684,7 @@ private:
             buckets_[i].clear();
         }
         for (size_t i = 0; i < locks_.allocated_size(); ++i) {
-            locks_[i].elems_in_buckets = 0;
+            locks_[i].elems_in_buckets.store(0, boost::memory_order_relaxed);
         }
         return ok;
     }
@@ -1693,7 +1693,8 @@ private:
     size_t cuckoo_size() const BOOST_NOEXCEPT_OR_NOTHROW {
         size_t size = 0;
         for (size_t i = 0; i < locks_.allocated_size(); ++i)
-            size += locks_[i].elems_in_buckets;
+            size +=
+                locks_[i].elems_in_buckets.load(boost::memory_order_relaxed);
         return size;
     }
 
@@ -1740,8 +1741,10 @@ private:
                             old_bucket, slot, new_bucket, new_bucket_slot++);
                         // Also update the lock counts, in case we're moving to
                         // a different lock.
-                        --locks_[lock_ind(bucket_i)].elems_in_buckets;
-                        ++locks_[lock_ind(new_bucket_i)].elems_in_buckets;
+                        nonatomic_dec(
+                            &locks_[lock_ind(bucket_i)].elems_in_buckets);
+                        nonatomic_inc(
+                            &locks_[lock_ind(new_bucket_i)].elems_in_buckets);
                     } else {
                         // Check that we don't want to move the new key
                         assert(
@@ -1754,6 +1757,20 @@ private:
             // to it have been unlocked
             locks_[start_lock_ind].unlock();
         }
+    }
+
+    // Performs a non-atomic increment on `obj`.
+    template <typename U>
+    static void nonatomic_inc(boost::atomic<U>* obj) {
+        obj->store(1 + obj->load(boost::memory_order_relaxed),
+                   boost::memory_order_relaxed);
+    }
+
+    // Performs a non-atomic decrement on `obj`.
+    template <typename U>
+    static void nonatomic_dec(boost::atomic<U>* obj) {
+        obj->store(-1 + obj->load(boost::memory_order_relaxed),
+                   boost::memory_order_relaxed);
     }
 
     // Executes the function over the given range split over num_threads threads

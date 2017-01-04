@@ -1,0 +1,129 @@
+dist: trusty
+sudo: required
+language: cpp
+
+cache:
+  directories:
+    - $TRAVIS_BUILD_DIR/.deps
+
+env:
+  global:
+    - PATH=$TRAVIS_BUILD_DIR/.deps/bin:$PATH
+
+matrix:
+  include:
+    # GCC
+    - compiler: gcc
+      env: COMPILER=g++ BUILD_TYPE=Debug
+      addons:
+        artifacts: true
+    - compiler: gcc
+      env: COMPILER=g++ BUILD_TYPE=Release
+      addons:
+        artifacts: true
+
+    # Ye olde GCC
+    - compiler: gcc
+      env: COMPILER=g++-4.4 BUILD_TYPE=Debug
+      addons:
+        apt:
+          packages:
+            - g++-4.4
+        artifacts: true
+    - compiler: gcc
+      env: COMPILER=g++-4.4 BUILD_TYPE=Release
+      addons:
+        apt:
+          packages:
+            - g++-4.4
+        artifacts: true
+
+    # Clang
+    - compiler: clang
+      env: COMPILER=clang++-3.8 BUILD_TYPE=Debug
+      addons:
+        apt:
+          packages:
+            clang-3.8
+        artifacts: true
+    - compiler: clang
+      env: COMPILER=clang++-3.8 BUILD_TYPE=Release
+      addons:
+        apt:
+          packages:
+            clang-3.8
+        artifacts: true
+
+    # GCC 6 w/ ASAN, UBSAN
+    - compiler: gcc
+      env:
+        - COMPILER=g++-6
+        - BUILD_TYPE=Debug
+        - CXXFLAGS="-fno-omit-frame-pointer -O1 -fsanitize=undefined,address -fno-sanitize-recover=all -fuse-ld=gold"
+        - UBSAN_OPTIONS=print_stacktrace=1
+      addons:
+        apt:
+          packages:
+            - g++-6
+          sources:
+            - ubuntu-toolchain-r-test
+        artifacts: true
+
+    # Clang w/ ASAN, UBSAN
+    - compiler: clang
+      env:
+        - COMPILER=clang++-3.8
+        - BUILD_TYPE=Debug
+        - CXXFLAGS="-fno-omit-frame-pointer -O1 -fsanitize=undefined,address -fno-sanitize-recover=all"
+        - UBSAN_OPTIONS=print_stacktrace=1
+      addons:
+        apt:
+          packages:
+            clang-3.8
+        artifacts: true
+
+    # Clang w/ TSAN
+    - compiler: clang
+      env:
+        - COMPILER=clang++-3.8
+        - BUILD_TYPE=Debug
+        - CXXFLAGS="-fno-omit-frame-pointer -O1 -fsanitize=thread"
+      addons:
+        apt:
+          packages:
+            clang-3.8
+        artifacts: true
+
+    # Clang w/ MSAN
+    - compiler: clang
+      env:
+        - ENABLE_MSAN=1
+        - COMPILER=clang++-3.8
+        - BUILD_TYPE=Debug
+        - LIBCXX_INSTALL_PREFIX="$TRAVIS_BUILD_DIR/.deps/opt/libcxx-msan-3.9.1"
+        - CXXFLAGS="-fno-omit-frame-pointer -O1 -fsanitize=memory -fsanitize-memory-track-origins -stdlib=libc++ -isystem $LIBCXX_INSTALL_PREFIX/include -isystem $LIBCXX_INSTALL_PREFIX/include/c++/v1"
+        - LDFLAGS="-L$LIBCXX_INSTALL_PREFIX/lib -lc++abi -Wl,-rpath,$LIBCXX_INSTALL_PREFIX/lib"
+      addons:
+        apt:
+          packages:
+            clang-3.8
+        artifacts: true
+
+
+install: ./.travis_setup.sh
+
+before_script:
+  - ulimit -c unlimited
+  - ulimit -a
+  - cat /proc/sys/kernel/core_pattern
+  - echo 'core.%e.%p.%h.%t' | sudo tee /proc/sys/kernel/core_pattern
+script:
+  - mkdir .build && cd .build
+  - cmake
+      -GNinja
+      -DCMAKE_CXX_COMPILER="${COMPILER}"
+      -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
+      -DCMAKE_PREFIX_PATH="${TRAVIS_BUILD_DIR}/.deps/opt/boost_1_63_0"
+      ..
+  - cmake --build . -- -j2
+  - ctest -T test --timeout 300 --output-on-failure

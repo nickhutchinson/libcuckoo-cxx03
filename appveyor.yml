@@ -1,0 +1,54 @@
+version: '{build}'
+
+clone_depth: 100
+
+configuration:
+  - Debug
+  - Release
+
+cache:
+  - _deps -> appveyor.yml, .appveyor_setup.sh
+
+environment:
+  matrix:
+    - COMPILER: msvc-16
+      TARGET: x86_64-pc-windows-msvc16.0.0
+      PATH: '%APPVEYOR_BUILD_FOLDER%\_deps\bin;%PATH%'
+      CC: cl
+      CXX: cl
+      VS: '"%ProgramFiles%\Microsoft SDKs\Windows\v7.1\Bin\SetEnv.cmd" /x64'
+      BOOST_INCLUDEDIR: '%APPVEYOR_BUILD_FOLDER%\_deps\boost_1_62_0-msvc-10.0-64'
+      BOOST_LIBRARYDIR: '%APPVEYOR_BUILD_FOLDER%\_deps\boost_1_62_0-msvc-10.0-64\lib64-msvc-10.0'
+      EXTRA_CMAKE_ARGS: '-DBoost_USE_STATIC_LIBS=1'
+
+    - COMPILER: msvc-19
+      TARGET: x86_64-pc-windows-msvc19.0.0
+      PATH: '%APPVEYOR_BUILD_FOLDER%\_deps\bin;%PATH%'
+      CC: cl
+      CXX: cl
+      VS: '"%ProgramFiles(x86)%\Microsoft Visual Studio 14.0\VC\vcvarsall.bat" amd64'
+      BOOST_INCLUDEDIR: 'c:\Libraries\boost_1_62_0'
+      BOOST_LIBRARYDIR: 'c:\Libraries\boost_1_62_0\lib64-msvc-14.0'
+      EXTRA_CMAKE_ARGS: '-DBoost_USE_STATIC_LIBS=1'
+
+install:
+  - sh .appveyor_setup.sh
+
+before_build:
+  - if defined VS ( call %VS% )
+
+build_script:
+  - mkdir _build
+  - cd _build
+
+  - cmake -GNinja -DBUILD_TESTS=1 -DBUILD_EXAMPLES=1 -DCMAKE_BUILD_TYPE=%CONFIGURATION% %EXTRA_CMAKE_ARGS% ..
+  - cmake --build . -- -j2
+
+test_script:
+  - ctest -T test --timeout 300 --output-on-failure
+
+on_finish:
+  - cd "%APPVEYOR_BUILD_FOLDER%"
+  - git ls-files -o --exclude _deps > artifacts.txt
+  - sh -c "tar cfz artifacts.tar.gz -T artifacts.txt"
+  - appveyor PushArtifact artifacts.tar.gz

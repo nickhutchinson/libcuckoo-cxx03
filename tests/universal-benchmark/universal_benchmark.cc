@@ -120,7 +120,7 @@ enum Ops {
 };
 
 void genkeys(std::vector<uint64_t>& keys,
-             const size_t gen_elems,
+             const size_t /*gen_elems*/,
              boost::random::mt19937_64& rng) {
     BOOST_FOREACH(uint64_t& num, keys) {
         num = rng();

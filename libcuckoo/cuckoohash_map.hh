@@ -717,7 +717,7 @@ private:
         const uint16_t hash_16bit = (
             static_cast<uint16_t>(hash_32bit) ^
             static_cast<uint16_t>(hash_32bit >> 16));
-        const uint16_t hash_8bit = (
+        const uint8_t hash_8bit = (
             static_cast<uint8_t>(hash_16bit) ^
             static_cast<uint8_t>(hash_16bit >> 8));
         return hash_8bit;

@@ -176,6 +176,8 @@ private:
     // A fast, lightweight spinlock
     LIBCUCKOO_SQUELCH_PADDING_WARNING
     class BOOST_ALIGNMENT(64) spinlock {
+    private:
+        BOOST_MOVABLE_BUT_NOT_COPYABLE(spinlock);
         boost::atomic_flag lock_;
 
     public:

@@ -57,12 +57,12 @@ TEST_CASE("reserve calc", "[resize]") {
 struct my_type {
     int x;
     ~my_type() {
-        ++num_deletes;
+        num_deletes.fetch_add(1, boost::memory_order_relaxed);
     }
-    static size_t num_deletes;
+    static boost::atomic<size_t> num_deletes;
 };
 
-size_t my_type::num_deletes = 0;
+boost::atomic<size_t> my_type::num_deletes(0);
 
 TEST_CASE("Resizing number of frees", "[resize]") {
     my_type val = {0};
@@ -77,8 +77,10 @@ TEST_CASE("Resizing number of frees", "[resize]") {
         }
         // If any of the items are moved during resize, their destructor will be
         // called.
-        REQUIRE(my_type::num_deletes <= 8);
-        num_deletes_after_resize = my_type::num_deletes;
+        REQUIRE(my_type::num_deletes.load(boost::memory_order_relaxed) <= 8);
+        num_deletes_after_resize =
+            my_type::num_deletes.load(boost::memory_order_relaxed);
     }
-    REQUIRE(my_type::num_deletes == num_deletes_after_resize + 9);
+    REQUIRE(my_type::num_deletes.load(boost::memory_order_relaxed) ==
+            num_deletes_after_resize + 9);
 }

@@ -47,7 +47,7 @@ template < class Key,
            class Hash = boost::hash<Key>,
            class Pred = std::equal_to<Key>,
            class Alloc = std::allocator<std::pair<const Key, T> >,
-           size_t SLOT_PER_BUCKET = DEFAULT_SLOT_PER_BUCKET
+           size_t SLOT_PER_BUCKET = LIBCUCKOO_DEFAULT_SLOT_PER_BUCKET
            >
 class cuckoohash_map {
 public:
@@ -268,19 +268,13 @@ private:
         }
 
         template <typename K, typename V>
-        void setKV(size_t ind, partial_t p, BOOST_FWD_REF(K) k,
-                   BOOST_FWD_REF(V) v) {
+        void setKV(allocator_type& alloc, size_t ind, partial_t p,
+                   BOOST_FWD_REF(K) k, BOOST_FWD_REF(V) v) {
             partial(ind) = p;
-            typename boost::container::allocator_traits<
-                allocator_type>::template rebind_alloc<storage_value_type>
-                pair_allocator;
-
             occupied_[ind] = true;
-
-            boost::container::allocator_traits<allocator_type>::
-                template rebind_traits<storage_value_type>::construct(
-                    pair_allocator, &storage_kvpair(ind), boost::forward<K>(k),
-                    boost::forward<V>(v));
+            boost::container::allocator_traits<allocator_type>::construct(
+                alloc, &storage_kvpair(ind), boost::forward<K>(k),
+                boost::forward<V>(v));
         }
 
         void eraseKV(size_t ind) {
@@ -298,12 +292,13 @@ private:
 
         // Moves the item in b1[slot1] into b2[slot2] without copying
         static void move_to_bucket(
+            allocator_type& alloc,
             Bucket& b1, size_t slot1,
             Bucket& b2, size_t slot2) {
             assert(b1.occupied(slot1));
             assert(!b2.occupied(slot2));
             storage_value_type& tomove = b1.storage_kvpair(slot1);
-            b2.setKV(slot2, b1.partial(slot1),
+            b2.setKV(alloc, slot2, b1.partial(slot1),
                      boost::move(tomove.first), boost::move(tomove.second));
             b1.eraseKV(slot1);
         }
@@ -317,10 +312,13 @@ private:
 
     // The type of the locks container
     BOOST_STATIC_ASSERT_MSG(
-        LOCK_ARRAY_GRANULARITY >= 0 && LOCK_ARRAY_GRANULARITY <= 16,
-        "LOCK_ARRAY_GRANULARITY constant must be between 0 and 16, inclusive");
-    typedef lazy_array<
-        16 - LOCK_ARRAY_GRANULARITY, LOCK_ARRAY_GRANULARITY, spinlock,
+        LIBCUCKOO_LOCK_ARRAY_GRANULARITY >= 0 &&
+            LIBCUCKOO_LOCK_ARRAY_GRANULARITY <= 16,
+        "LIBCUCKOO_LOCK_ARRAY_GRANULARITY constant must be between "
+        "0 and 16, inclusive");
+    typedef libcuckoo_lazy_array<
+        16 - LIBCUCKOO_LOCK_ARRAY_GRANULARITY, LIBCUCKOO_LOCK_ARRAY_GRANULARITY,
+        spinlock,
         libcuckoo_aligned_allocator<typename boost::container::allocator_traits<
             allocator_type>::template rebind_alloc<spinlock> > >
         locks_t;
@@ -384,16 +382,17 @@ public:
      * @throw std::invalid_argument if the given minimum load factor is invalid,
      * or if the initial space exceeds the maximum hashpower
      */
-    cuckoohash_map(size_t n = DEFAULT_SIZE,
-                   double mlf = DEFAULT_MINIMUM_LOAD_FACTOR,
-                   size_t mhp = NO_MAXIMUM_HASHPOWER,
+    cuckoohash_map(size_t n = LIBCUCKOO_DEFAULT_SIZE,
+                   double mlf = LIBCUCKOO_DEFAULT_MINIMUM_LOAD_FACTOR,
+                   size_t mhp = LIBCUCKOO_NO_MAXIMUM_HASHPOWER,
                    const hasher& hf = hasher(),
-                   const key_equal eql = key_equal())
-        : hash_fn(hf), eq_fn(eql) {
+                   const key_equal& eql = key_equal(),
+                   const allocator_type& alloc = allocator_type())
+        : hash_fn(hf), eq_fn(eql), pair_allocator_(alloc) {
         minimum_load_factor(mlf);
         maximum_hashpower(mhp);
         const size_t hp = reserve_calc(n);
-        if (mhp != NO_MAXIMUM_HASHPOWER && hp > mhp) {
+        if (mhp != LIBCUCKOO_NO_MAXIMUM_HASHPOWER && hp > mhp) {
             throw std::invalid_argument(
                 "hashpower for initial size " +
                 boost::lexical_cast<std::string>(hp) +
@@ -668,6 +667,11 @@ public:
     //! key_eq returns the equality predicate object used by the table.
     key_equal key_eq() const BOOST_NOEXCEPT_OR_NOTHROW {
         return eq_fn;
+    }
+
+    //! get_allocator returns the allocator object used by the table.
+    allocator_type get_allocator() const BOOST_NOEXCEPT_OR_NOTHROW {
+        return pair_allocator_;
     }
 
     //! Returns a \ref reference to the mapped value stored at the given key.
@@ -1271,7 +1275,7 @@ private:
                 return false;
             }
 
-            Bucket::move_to_bucket(fb, fs, tb, ts);
+            Bucket::move_to_bucket(pair_allocator_, fb, fs, tb, ts);
             if (depth == 1) {
                 // Hold onto the locks contained in twob
                 b = boost::move(twob);
@@ -1391,8 +1395,8 @@ private:
                        const size_t bucket_ind, const size_t slot,
                        BOOST_FWD_REF(K) key, BOOST_FWD_REF(V) val) {
         assert(!b.occupied(slot));
-        b.setKV(slot, partial, boost::forward<K>(key),
-                boost::forward<V>(val));
+        b.setKV(pair_allocator_, slot, partial,
+                boost::forward<K>(key), boost::forward<V>(val));
         nonatomic_inc(&locks_[lock_ind(bucket_ind)].elems_in_buckets);
     }
 
@@ -1738,6 +1742,7 @@ private:
                         // We're moving the key from the old bucket to the new
                         // one
                         Bucket::move_to_bucket(
+                            pair_allocator_,
                             old_bucket, slot, new_bucket, new_bucket_slot++);
                         // Also update the lock counts, in case we're moving to
                         // a different lock.
@@ -1837,7 +1842,7 @@ private:
         }
         const size_t new_hp = current_hp + 1;
         const size_t mhp = maximum_hashpower();
-        if (mhp != NO_MAXIMUM_HASHPOWER && new_hp > mhp) {
+        if (mhp != LIBCUCKOO_NO_MAXIMUM_HASHPOWER && new_hp > mhp) {
             throw libcuckoo_maximum_hashpower_exceeded(new_hp);
         }
 
@@ -1914,7 +1919,7 @@ private:
     cuckoo_status cuckoo_expand_simple(size_t new_hp,
                                        bool is_expansion) {
         const size_t mhp = maximum_hashpower();
-        if (mhp != NO_MAXIMUM_HASHPOWER && new_hp > mhp) {
+        if (mhp != LIBCUCKOO_NO_MAXIMUM_HASHPOWER && new_hp > mhp) {
             throw libcuckoo_maximum_hashpower_exceeded(new_hp);
         }
         const AllUnlocker unlocker = snapshot_and_lock_all();
@@ -1932,8 +1937,10 @@ private:
         cuckoohash_map<Key, T, Hash, Pred, Alloc, slot_per_bucket> new_map(
             hashsize(new_hp) * slot_per_bucket,
             0.0, /* minimum load factor */
-            NO_MAXIMUM_HASHPOWER
-            );
+            LIBCUCKOO_NO_MAXIMUM_HASHPOWER,
+            hash_function(),
+            key_eq(),
+            get_allocator());
 
         parallel_exec(0, hashsize(hp), kNumCores(),
                       SimpleMoveBucketsFn(this, &new_map));
@@ -2316,6 +2323,9 @@ private:
 
     // The equality function
     key_equal eq_fn;
+
+    // The allocator
+    allocator_type pair_allocator_;
 };
 
 #endif // _CUCKOOHASH_MAP_HH

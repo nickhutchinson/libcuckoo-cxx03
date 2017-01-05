@@ -22,7 +22,7 @@
 template <uint8_t OFFSET_BITS, uint8_t SEGMENT_BITS,
           class T, class Alloc = std::allocator<T>
           >
-class lazy_array {
+class libcuckoo_lazy_array {
     BOOST_STATIC_ASSERT_MSG(SEGMENT_BITS + OFFSET_BITS <= sizeof(size_t) * 8,
                             "The number of segment and offset bits cannot "
                             "exceed  the number of bits in a size_t");
@@ -33,7 +33,7 @@ private:
     // operator can still add segments
     mutable boost::array<T*, NUM_SEGMENTS> segments_;
 
-    void move_other_array(BOOST_RV_REF(lazy_array) arr) {
+    void move_other_array(BOOST_RV_REF(libcuckoo_lazy_array) arr) {
         clear();
         std::copy(arr.segments_.begin(), arr.segments_.end(),
                   segments_.begin());
@@ -84,23 +84,23 @@ private:
     }
 
     // No copying
-    BOOST_MOVABLE_BUT_NOT_COPYABLE(lazy_array);
+    BOOST_MOVABLE_BUT_NOT_COPYABLE(libcuckoo_lazy_array);
 
 public:
-    lazy_array(): segments_() {}
+    libcuckoo_lazy_array(): segments_() {}
 
     //! Move constructor for a lazy array
-    lazy_array(BOOST_RV_REF(lazy_array) arr) : segments_() {
+    libcuckoo_lazy_array(BOOST_RV_REF(libcuckoo_lazy_array) arr) : segments_() {
         move_other_array(boost::move(arr));
     }
 
     //! Move assignment for a lazy array
-    lazy_array& operator=(BOOST_RV_REF(lazy_array) arr) {
+    libcuckoo_lazy_array& operator=(BOOST_RV_REF(libcuckoo_lazy_array) arr) {
         move_other_vector(boost::move(arr));
         return *this;
     }
 
-    ~lazy_array() {
+    ~libcuckoo_lazy_array() {
         clear();
     }
 

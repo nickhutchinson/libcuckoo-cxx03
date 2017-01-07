@@ -245,10 +245,10 @@ public:
 
 // A function to get the maximum resident set size in bytes on different
 // machines.
-#ifdef HAVE_MACH_MACH_H
+#if defined(HAVE_MACH_MACH_H)
 #include <mach/mach.h>
 
-long max_rss() {
+inline int64_t max_rss() {
     struct task_basic_info t_info;
     mach_msg_type_number_t t_info_count = TASK_BASIC_INFO_COUNT;
     if (KERN_SUCCESS != task_info(mach_task_self(),
@@ -256,29 +256,38 @@ long max_rss() {
                                   &t_info_count)) {
         return -1;
     }
-    return t_info.resident_size;
+    return static_cast<int64_t>(t_info.resident_size);
 }
 
-#else
-#ifdef HAVE_SYS_RESOURCE_H
+#elif defined(HAVE_SYS_RESOURCE_H)
 #include <sys/resource.h>
 
-long max_rss() {
+inline int64_t max_rss() {
     struct rusage usage;
     if (getrusage(RUSAGE_SELF, &usage) == -1) {
         return -1;
     } else {
-        return usage.ru_maxrss * 1024;
+        return static_cast<int64_t>(usage.ru_maxrss * 1024);
     }
 }
 
-#else
+#elif defined(_WIN32)
+#include <windows.h>
+#include <psapi.h>
 
-long max_rss() {
+inline int64_t max_rss() {
+    PROCESS_MEMORY_COUNTERS usage = {sizeof(usage)};
+    if (!GetProcessMemoryInfo(GetCurrentProcess(), &usage, sizeof(usage))) {
+        return -1;
+    }
+    return static_cast<int64_t>(usage.PeakWorkingSetSize);
+}
+
+#else
+inline int64_t max_rss() {
     return -1;
 }
 
-#endif
 #endif
 
 #endif // _TEST_UTIL_HH

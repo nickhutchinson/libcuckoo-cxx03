@@ -9,6 +9,16 @@ target_include_directories(test_util INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
 )
+if (CMAKE_SYSTEM_NAME MATCHES Windows)
+    target_compile_definitions(test_util INTERFACE
+        # Minimise header pollution from windows.h.
+        -DWIN32_LEAN_AND_MEAN=1
+        -DNOMINMAX=1
+
+        # Enable PSAPI v2. See: https://msdn.microsoft.com/en-us/library/windows/desktop/ms683219(v=vs.85).aspx
+        PSAPI_VERSION=2
+    )
+endif ()
 
 # Adds optimized flags to a list of executables
 function(add_optimized_cxx_flags)

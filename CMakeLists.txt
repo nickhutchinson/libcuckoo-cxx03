@@ -26,6 +26,7 @@ if (MSVC)
     -wd4459 # Suppress: declaration of 'x' hides global declaration
     -wd4510 # Suppress: default constructor could not be generated
     -wd4512 # Suppress: assignment operator could not be generated
+    -wd4610 # Suppress: object 'class' can never be instantiated - user-defined constructor required
   )
 
   # Enable debug symbols in release builds

@@ -316,7 +316,7 @@ int main(int argc, char** argv) {
     parse_flags(argc, argv, "Runs a stress test on inserts, deletes, and finds",
                 args, arg_vars, arg_help, sizeof(args)/sizeof(const char*),
                 flags, flag_vars, flag_help, sizeof(flags)/sizeof(const char*));
-    g_numkeys = 1U << g_power;
+    g_numkeys = 1ULL << g_power;
 
     if (g_use_strings) {
         AllEnvironment<KeyType2> *env = new AllEnvironment<KeyType2>;

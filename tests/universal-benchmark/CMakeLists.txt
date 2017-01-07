@@ -4,6 +4,9 @@ add_executable(universal_benchmark
     universal_table_wrapper.hh
 )
 
+target_compile_definitions(universal_benchmark
+    PRIVATE __STDC_FORMAT_MACROS)
+
 target_link_libraries(universal_benchmark
     PRIVATE test_util
     PRIVATE libcuckoo

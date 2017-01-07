@@ -1,6 +1,11 @@
 /* Benchmarks a mix of operations for a compile-time specified key-value pair */
 
+#if defined(_MSC_VER) && _MSC_VER < 1700
 #include <stdint.h>
+#define PRId64 "I64d"
+#else
+#include <inttypes.h>
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -357,7 +362,7 @@ int main(int argc, char** argv) {
             "        \"total_ops\": {\n"
             "            \"name\": \"Total Operations\",\n"
             "            \"units\": \"count\",\n"
-            "            \"value\": %zu\n"
+            "            \"value\": %" PRId64 "\n"
             "        },\n"
             "        \"time_elapsed\": {\n"
             "            \"name\": \"Time Elapsed\",\n"
@@ -372,12 +377,12 @@ int main(int argc, char** argv) {
             "        \"max_rss_change\": {\n"
             "            \"name\": \"Change in Maximum RSS\",\n"
             "            \"units\": \"bytes\",\n"
-            "            \"value\": %ld\n"
+            "            \"value\": %" PRId64 "\n"
             "        }\n"
             "    }\n"
             "}\n";
         printf(json_format, argstr.str().c_str(), XSTR(KEY), XSTR(VALUE),
-               TABLE, total_ops, seconds_elapsed,
+               TABLE, static_cast<int64_t>(total_ops), seconds_elapsed,
                total_ops / seconds_elapsed, end_rss - start_rss);
     } catch (const std::exception& e) {
         std::cerr << e.what();

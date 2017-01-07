@@ -5,6 +5,8 @@
 #include <string>
 #include <utility>
 
+#include <boost/align/alignment_of.hpp>
+#include <boost/aligned_storage.hpp>
 #include <boost/chrono.hpp>
 #include <boost/move/move.hpp>
 #include <boost/thread.hpp>
@@ -61,8 +63,20 @@ TEST_CASE("iterator release", "[iterator]") {
     }
 
     SECTION("release through destructor") {
-        IntIntTable::locked_table::iterator it = table.lock_table().begin();
+        boost::aligned_storage<sizeof(IntIntTable::locked_table),
+                               boost::alignment::alignment_of<
+                                   IntIntTable::locked_table>::value>::type
+            lt_storage;
+        new (&lt_storage) IntIntTable::locked_table(table.lock_table());
+        IntIntTable::locked_table& lt_ref =
+            *reinterpret_cast<IntIntTable::locked_table*>(&lt_storage);
+        IntIntTable::locked_table::iterator it = lt_ref.begin();
+        lt_ref.IntIntTable::locked_table::~locked_table();
         AssertIteratorIsReleased(it);
+        AssertLockedTableIsReleased(lt_ref);
+        lt_ref.release();
+        AssertIteratorIsReleased(it);
+        AssertLockedTableIsReleased(lt_ref);
     }
 
     SECTION("released iterator equality") {

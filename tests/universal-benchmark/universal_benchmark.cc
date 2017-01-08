@@ -324,7 +324,7 @@ int main(int argc, char** argv) {
         "total_ops": {
             "name": "Total Operations",
             "units": "count",
-            "value": %zu
+            "value": %lld
         },
         "time_elapsed": {
             "name": "Time Elapsed",
@@ -339,14 +339,15 @@ int main(int argc, char** argv) {
         "max_rss_change": {
             "name": "Change in Maximum RSS",
             "units": "bytes",
-            "value": %ld
+            "value": %lld
         }
     }
 }
 )";
-        printf(json_format, argstr.str().c_str(), XSTR(KEY), XSTR(VALUE),
-               TABLE, total_ops, seconds_elapsed,
-               total_ops / seconds_elapsed, end_rss - start_rss);
+        printf(json_format, argstr.str().c_str(), XSTR(KEY), XSTR(VALUE), TABLE,
+               static_cast<long long>(total_ops), seconds_elapsed,
+               total_ops / seconds_elapsed,
+               static_cast<long long>(end_rss - start_rss));
     } catch (const std::exception& e) {
         std::cerr << e.what();
         std::exit(1);

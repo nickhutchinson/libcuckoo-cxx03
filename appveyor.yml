@@ -1,0 +1,46 @@
+version: '{build}'
+
+configuration:
+  - Debug
+  - Release
+
+cache:
+  - _deps -> appveyor.yml, .appveyor_setup.sh
+
+environment:
+  matrix:
+    - COMPILER: clang-3.9
+      TARGET: x86_64-pc-windows-msvc19.0.0
+      PATH: '%APPVEYOR_BUILD_FOLDER%\_deps\bin;%PATH%'
+      CC: clang-cl
+      CXX: clang-cl
+      VS: '"%ProgramFiles(x86)%\Microsoft Visual Studio 14.0\VC\vcvarsall.bat" amd64'
+
+    - COMPILER: msvc-19
+      TARGET: x86_64-pc-windows-msvc19.0.0
+      PATH: '%APPVEYOR_BUILD_FOLDER%\_deps\bin;%PATH%'
+      CC: cl
+      CXX: cl
+      VS: '"%ProgramFiles(x86)%\Microsoft Visual Studio 14.0\VC\vcvarsall.bat" amd64'
+
+install:
+  - sh .appveyor_setup.sh
+
+before_build:
+  - if defined VS ( call %VS% )
+
+build_script:
+  - mkdir _build
+  - cd _build
+
+  - cmake -GNinja -DBUILD_TESTS=1 -DBUILD_EXAMPLES=1 -DCMAKE_BUILD_TYPE=%CONFIGURATION% ..
+  - cmake --build . -- -j2
+
+test_script:
+  - ctest -T test --timeout 300 --output-on-failure
+
+on_finish:
+  - cd "%APPVEYOR_BUILD_FOLDER%"
+  - git ls-files -o --exclude _deps > artifacts.txt
+  - sh -c "tar cfz artifacts.tar.gz -T artifacts.txt"
+  - appveyor PushArtifact artifacts.tar.gz

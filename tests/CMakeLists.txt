@@ -13,8 +13,7 @@ target_include_directories(test_util INTERFACE
 # Adds optimized flags to a list of executables
 function(add_optimized_cxx_flags)
     foreach(target ${ARGN})
-        if((CMAKE_CXX_COMPILER_ID MATCHES "Clang") OR
-            ((CMAKE_CXX_COMPILER_ID MATCHES "GNU")))
+        if(NOT MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
             target_compile_options(${target} PUBLIC -O3 -DNDEBUG)
         endif()
     endforeach()
@@ -23,8 +22,7 @@ endfunction()
 # Adds debug flags to a list of executables
 function(add_debug_cxx_flags)
     foreach(target ${ARGN})
-        if((CMAKE_CXX_COMPILER_ID MATCHES "Clang") OR
-            ((CMAKE_CXX_COMPILER_ID MATCHES "GNU")))
+        if(NOT MSVC AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
             target_compile_options(${target} PUBLIC -O0 -g)
         endif()
     endforeach()

@@ -1,21 +1,21 @@
 /* A simple example of using the hash table that counts the
  * frequencies of a sequence of random numbers. */
 
-#include <iostream>
-#include <random>
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <functional>
+#include <iostream>
 #include <limits>
-#include <vector>
-#include <algorithm>
+#include <random>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <libcuckoo/cuckoohash_map.hh>
-#include <libcuckoo/city_hasher.hh>
 
 typedef uint32_t KeyType;
-typedef cuckoohash_map<KeyType, size_t, CityHasher<KeyType> > Table;
+typedef cuckoohash_map<KeyType, size_t> Table;
 const size_t thread_num = 8;
 const size_t total_inserts = 10000000;
 

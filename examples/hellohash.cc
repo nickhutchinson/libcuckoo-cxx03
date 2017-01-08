@@ -1,12 +1,12 @@
 #include <stdio.h>
-#include <string>
+#include <functional>
 #include <iostream>
+#include <string>
 
 #include <libcuckoo/cuckoohash_map.hh>
-#include <libcuckoo/city_hasher.hh>
 
 int main() {
-    cuckoohash_map<int, std::string, CityHasher<int> >Table;
+    cuckoohash_map<int, std::string> Table;
 
     for (int i = 0; i < 100; i++) {
         Table[i] = "hello"+std::to_string(i);

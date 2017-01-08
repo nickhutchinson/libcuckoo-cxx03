@@ -3,6 +3,14 @@ project(libcuckoo LANGUAGES CXX)
 set (libcuckoo_VERSION_MAJOR 0)
 set (libcuckoo_VERSION_MINOR 2)
 
+if(NOT MSVC)
+  set(CMAKE_CXX_STANDARD 11)
+  add_compile_options(
+    -Wall
+    -Wextra
+  )
+endif()
+
 # Add the libcuckoo interface target
 add_subdirectory(libcuckoo)
 

@@ -14,24 +14,24 @@ matrix:
   include:
     # GCC
     - compiler: gcc
-      env: COMPILER=g++ BUILD_TYPE=Debug
+      env: COMPILER=g++ C_COMPILER=gcc BUILD_TYPE=Debug
       addons:
         artifacts: true
     - compiler: gcc
-      env: COMPILER=g++ BUILD_TYPE=Release
+      env: COMPILER=g++ C_COMPILER=gcc BUILD_TYPE=Release
       addons:
         artifacts: true
 
     # Ye olde GCC
     - compiler: gcc
-      env: COMPILER=g++-4.4 BUILD_TYPE=Debug
+      env: COMPILER=g++-4.4 C_COMPILER=gcc-4.4 BUILD_TYPE=Debug
       addons:
         apt:
           packages:
             - g++-4.4
         artifacts: true
     - compiler: gcc
-      env: COMPILER=g++-4.4 BUILD_TYPE=Release
+      env: COMPILER=g++-4.4 C_COMPILER=gcc-4.4 BUILD_TYPE=Release
       addons:
         apt:
           packages:
@@ -40,14 +40,14 @@ matrix:
 
     # Clang
     - compiler: clang
-      env: COMPILER=clang++-3.8 BUILD_TYPE=Debug
+      env: COMPILER=clang++-3.8 C_COMPILER=clang-3.8 BUILD_TYPE=Debug
       addons:
         apt:
           packages:
             clang-3.8
         artifacts: true
     - compiler: clang
-      env: COMPILER=clang++-3.8 BUILD_TYPE=Release
+      env: COMPILER=clang++-3.8 C_COMPILER=clang-3.8 BUILD_TYPE=Release
       addons:
         apt:
           packages:
@@ -58,8 +58,10 @@ matrix:
     - compiler: gcc
       env:
         - COMPILER=g++-6
+        - C_COMPILER=gcc-6
         - BUILD_TYPE=Debug
-        - CXXFLAGS="-fno-omit-frame-pointer -O1 -fsanitize=undefined,address -fno-sanitize-recover=all -fuse-ld=gold"
+        - CFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=undefined,address -fno-sanitize=vptr -fuse-ld=gold"
+        - CXXFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=undefined,address -fno-sanitize=vptr -fuse-ld=gold"
         - UBSAN_OPTIONS=print_stacktrace=1
       addons:
         apt:
@@ -73,8 +75,10 @@ matrix:
     - compiler: clang
       env:
         - COMPILER=clang++-3.8
+        - C_COMPILER=clang-3.8
         - BUILD_TYPE=Debug
-        - CXXFLAGS="-fno-omit-frame-pointer -O1 -fsanitize=undefined,address -fno-sanitize-recover=all"
+        - CFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=undefined,address -fno-sanitize=vptr"
+        - CXXFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=undefined,address -fno-sanitize=vptr"
         - UBSAN_OPTIONS=print_stacktrace=1
       addons:
         apt:
@@ -86,9 +90,11 @@ matrix:
     - compiler: clang
       env:
         - COMPILER=clang++-3.8
+        - C_COMPILER=clang-3.8
         - BUILD_TYPE=Debug
-        - CXXFLAGS="-fno-omit-frame-pointer -O1 -fsanitize=thread"
-        - TSAN_OPTIONS="history_size=7"
+        - CFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=thread"
+        - CXXFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=thread"
+        - TSAN_OPTIONS="history_size=7 suppressions=$TRAVIS_BUILD_DIR/.tsan.supp"
       addons:
         apt:
           packages:
@@ -100,9 +106,11 @@ matrix:
       env:
         - ENABLE_MSAN=1
         - COMPILER=clang++-3.8
+        - C_COMPILER=clang-3.8
         - BUILD_TYPE=Debug
         - LIBCXX_INSTALL_PREFIX="$TRAVIS_BUILD_DIR/.deps/opt/libcxx-msan-3.9.1"
-        - CXXFLAGS="-fno-omit-frame-pointer -O1 -fsanitize=memory -fsanitize-memory-track-origins -stdlib=libc++ -isystem $LIBCXX_INSTALL_PREFIX/include -isystem $LIBCXX_INSTALL_PREFIX/include/c++/v1"
+        - CFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=memory -fsanitize-memory-track-origins -fsanitize-blacklist=$TRAVIS_BUILD_DIR/.msan.blacklist.txt"
+        - CXXFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=memory -fsanitize-memory-track-origins -fsanitize-blacklist=$TRAVIS_BUILD_DIR/.msan.blacklist.txt -stdlib=libc++ -isystem $LIBCXX_INSTALL_PREFIX/include -isystem $LIBCXX_INSTALL_PREFIX/include/c++/v1"
         - LDFLAGS="-L$LIBCXX_INSTALL_PREFIX/lib -lc++abi -Wl,-rpath,$LIBCXX_INSTALL_PREFIX/lib"
       addons:
         apt:
@@ -124,9 +132,10 @@ script:
       -GNinja
       -DBUILD_TESTS=1
       -DBUILD_EXAMPLES=1
+      -DCMAKE_C_COMPILER="${C_COMPILER}"
       -DCMAKE_CXX_COMPILER="${COMPILER}"
       -DCMAKE_BUILD_TYPE="${BUILD_TYPE}"
-      -DCMAKE_PREFIX_PATH="${TRAVIS_BUILD_DIR}/.deps/opt/boost_1_63_0"
+      -DCMAKE_PREFIX_PATH="${TRAVIS_BUILD_DIR}/.deps/opt/boost_1_63_0;${TRAVIS_BUILD_DIR}/.deps/opt/tbb2017_20160908oss"
       ..
   - cmake --build . -- -j2
   - ctest -T test --timeout 300 --output-on-failure

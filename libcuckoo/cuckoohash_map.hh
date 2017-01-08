@@ -37,6 +37,11 @@
 #include <boost/tuple/tuple.hpp>
 #include <boost/type_traits.hpp>
 
+#include <tbb/blocked_range.h>
+#include <tbb/concurrent_vector.h>
+#include <tbb/parallel_for.h>
+#include <tbb/spin_rw_mutex.h>
+
 #include "cuckoohash_config.hh"
 #include "cuckoohash_util.hh"
 #include "lazy_array.hh"
@@ -164,41 +169,39 @@ private:
     // number of locks in the locks array
     BOOST_STATIC_CONSTEXPR size_t kNumLocks = 1 << 16;
 
-    // number of cores on the machine
-    static size_t kNumCores() {
-        static boost::atomic<size_t> cores;
-        if (!cores.load(boost::memory_order_relaxed))
-            cores.store(boost::thread::hardware_concurrency(),
-                        boost::memory_order_relaxed);
-        return cores.load(boost::memory_order_relaxed);
-    }
-
-    // A fast, lightweight spinlock
     LIBCUCKOO_SQUELCH_PADDING_WARNING
     class BOOST_ALIGNMENT(64) spinlock {
     private:
-        BOOST_MOVABLE_BUT_NOT_COPYABLE(spinlock);
-        boost::atomic_flag lock_;
+        tbb::spin_rw_mutex lock_;
+
+        spinlock(const spinlock&);
+        void operator=(const spinlock&);
 
     public:
         boost::atomic<size_t> elems_in_buckets;
 
-        spinlock() : elems_in_buckets(0) {
-            lock_.clear();
+        spinlock() : elems_in_buckets(0) {}
+
+        void lock_shared() {
+            lock_.lock_read();
+            LIBCUCKOO_ANNOTATE_HAPPENS_AFTER(this);
         }
 
-        inline void lock() {
-            while (lock_.test_and_set(boost::memory_order_acq_rel));
+        void lock() {
+            lock_.lock();
+            LIBCUCKOO_ANNOTATE_HAPPENS_AFTER(this);
         }
 
-        inline void unlock() {
-            lock_.clear(boost::memory_order_release);
+        bool try_lock() {
+            if (!lock_.try_lock()) return false;
+            LIBCUCKOO_ANNOTATE_HAPPENS_AFTER(this);
+            return true;
         }
 
-        inline bool try_lock() {
-            return !lock_.test_and_set(boost::memory_order_acq_rel);
+        void unlock() {
+            LIBCUCKOO_ANNOTATE_HAPPENS_BEFORE(this);
+            lock_.unlock();
         }
-
     };
 
     typedef enum {
@@ -474,7 +477,7 @@ public:
     template <typename K>
     bool find(const K& key, mapped_type& val) const {
         const hash_value hv = hashed_key(key);
-        const TwoBuckets b = snapshot_and_lock_two(hv);
+        const TwoBuckets b = snapshot_and_lock_two_shared(hv);
         const cuckoo_status st = cuckoo_find(key, val, hv.partial, b.i[0], b.i[1]);
         return (st == ok);
     }
@@ -498,7 +501,7 @@ public:
     template <typename K>
     bool contains(const K& key) const {
         const hash_value hv = hashed_key(key);
-        const TwoBuckets b = snapshot_and_lock_two(hv);
+        const TwoBuckets b = snapshot_and_lock_two_shared(hv);
         const bool result = cuckoo_contains(key, hv.partial, b.i[0], b.i[1]);
         return result;
     }
@@ -844,6 +847,21 @@ private:
         return TwoBuckets(this, i1, i2);
     }
 
+    TwoBuckets lock_two_shared(const size_t hp, const size_t i1,
+                               const size_t i2) const {
+        size_t l1 = lock_ind(i1);
+        size_t l2 = lock_ind(i2);
+        if (l2 < l1) {
+            std::swap(l1, l2);
+        }
+        locks_[l1].lock_shared();
+        check_hashpower(hp, l1);
+        if (l2 != l1) {
+            locks_[l2].lock_shared();
+        }
+        return TwoBuckets(this, i1, i2);
+    }
+
     // lock_two_one locks the three bucket indexes in numerical order, returning
     // the containers as a two (i1 and i2) and a one (i3). The one will not be
     // active if i3 shares a lock index with i1 or i2.
@@ -889,6 +907,22 @@ private:
             const size_t i2 = alt_index(hp, hv.partial, i1);
             try {
                 return lock_two(hp, i1, i2);
+            } catch (hashpower_changed&) {
+                // The hashpower changed while taking the locks. Try again.
+                continue;
+            }
+        }
+    }
+
+    TwoBuckets snapshot_and_lock_two_shared(const hash_value& hv) const
+        BOOST_NOEXCEPT_OR_NOTHROW {
+        while (true) {
+            // Store the current hashpower we're using to compute the buckets
+            const size_t hp = get_hashpower();
+            const size_t i1 = index_hash(hp, hv.hash);
+            const size_t i2 = alt_index(hp, hv.partial, i1);
+            try {
+                return lock_two_shared(hp, i1, i2);
             } catch (hashpower_changed&) {
                 // The hashpower changed while taking the locks. Try again.
                 continue;
@@ -1756,28 +1790,34 @@ private:
                    boost::memory_order_relaxed);
     }
 
+    template <typename F>
+    struct ParallelExecHelper {
+        ParallelExecHelper(const F& f,
+                           tbb::concurrent_vector<boost::exception_ptr>* eptrs)
+            : f_(f), eptrs_(eptrs) {}
+
+        void operator()(tbb::blocked_range<size_t> r) const {
+            boost::exception_ptr eptr;
+            f_(r.begin(), r.end(), eptr);
+            if (eptr) {
+                tbb::task::self().cancel_group_execution();
+                eptrs_->push_back(eptr);
+            }
+            LIBCUCKOO_ANNOTATE_HAPPENS_BEFORE(&f_);
+        }
+
+        const F& f_;
+        tbb::concurrent_vector<boost::exception_ptr>* eptrs_;
+    };
+
     // Executes the function over the given range split over num_threads threads
     template <class F>
-    static void parallel_exec(size_t start, size_t end,
-                              size_t num_threads, F func) {
-        size_t work_per_thread = (end - start) / num_threads;
-        boost::container::vector<boost::thread> threads(num_threads);
-        boost::container::vector<boost::exception_ptr> eptrs(num_threads);
-        for (size_t i = 0; i < num_threads - 1; ++i) {
-            threads[i] = boost::thread(func, start, start + work_per_thread,
-                                       boost::ref(eptrs[i]));
-            start += work_per_thread;
-        }
-        threads[num_threads - 1] = boost::thread(
-            func, start, end, boost::ref(eptrs[num_threads - 1]));
-        for (size_t i=0; i < num_threads; ++i) {
-            threads[i].join();
-        }
-        for (size_t i=0; i < num_threads; ++i) {
-            if (eptrs[i]) {
-                boost::rethrow_exception(eptrs[i]);
-            }
-        }
+    static void parallel_exec(size_t start, size_t end, F func) {
+        tbb::concurrent_vector<boost::exception_ptr> eptrs;
+        tbb::parallel_for(tbb::blocked_range<size_t>(start, end),
+                          ParallelExecHelper<F>(func, &eptrs));
+        LIBCUCKOO_ANNOTATE_HAPPENS_AFTER(&func);
+        if (!eptrs.empty()) boost::rethrow_exception(eptrs.front());
     }
 
     struct MoveBucketsFn {
@@ -1848,10 +1888,10 @@ private:
         // each slot, since it depends on the hashpower.
         const size_t locks_to_move = std::min(locks_t::size(),
                                               hashsize(current_hp));
-        parallel_exec(0, locks_to_move, kNumCores(),
+        parallel_exec(0, locks_to_move,
                       MoveBucketsFn(this, current_hp, new_hp));
 
-        parallel_exec(locks_to_move, locks_.allocated_size(), kNumCores(),
+        parallel_exec(locks_to_move, locks_.allocated_size(),
                       UnlockLocksFn(this));
 
         // Since we've unlocked the buckets ourselves, we don't need the
@@ -1920,8 +1960,7 @@ private:
             key_eq(),
             get_allocator());
 
-        parallel_exec(0, hashsize(hp), kNumCores(),
-                      SimpleMoveBucketsFn(this, &new_map));
+        parallel_exec(0, hashsize(hp), SimpleMoveBucketsFn(this, &new_map));
 
         // Swap the current buckets vector with new_map's and set the hashpower.
         // This is okay, because we have all the locks, so nobody else should be

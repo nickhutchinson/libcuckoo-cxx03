@@ -40,6 +40,7 @@ if [[ ${ENABLE_MSAN:-0} -eq 1 && ! -d "$libcxx_msan_install_prefix" ]]; then
     pushd build
     env CFLAGS= CXXFLAGS= LDFLAGS= cmake                       \
         ../src                                                 \
+        -DCMAKE_C_COMPILER="${C_COMPILER}"                     \
         -DCMAKE_CXX_COMPILER="${COMPILER}"                     \
         -DCMAKE_BUILD_TYPE=Release                             \
         -DCMAKE_INSTALL_PREFIX="${libcxx_msan_install_prefix}" \
@@ -49,6 +50,25 @@ if [[ ${ENABLE_MSAN:-0} -eq 1 && ! -d "$libcxx_msan_install_prefix" ]]; then
     ninja -j2 install-libcxx install-libcxxabi
     popd
 
+    popd
+    rm -fr "$work_dir"
+fi
+
+tbb_install_prefix=$(pwd)/.deps/opt/tbb2017_20160908oss
+if [[ ! -d "$tbb_install_prefix" ]]; then
+    work_dir=$(mktemp -d -t tbb_build.XXXXX)
+    pushd "$work_dir"
+    git clone https://github.com/wjakob/tbb.git .
+    git checkout -qf fd48e97
+    git revert --no-edit 848cd19
+    cmake                                            \
+        -GNinja                                      \
+        "-DCMAKE_C_COMPILER=$C_COMPILER"             \
+        "-DCMAKE_CXX_COMPILER=$COMPILER"             \
+        -DCMAKE_BUILD_TYPE=Release                   \
+        "-DCMAKE_INSTALL_PREFIX=$tbb_install_prefix" \
+        .
+    cmake --build . --target install
     popd
     rm -fr "$work_dir"
 fi

@@ -1,0 +1,8 @@
+# MemorySanitizer blacklist
+
+# ==4707==WARNING: MemorySanitizer: use-of-uninitialized-value
+# tbb::internal::cpu_ctl_env::operator!=(tbb::internal::cpu_ctl_env const&) const ./include/tbb/machine/gcc_ia32_common.h:79:81
+# tbb::internal::cpu_ctl_env_helper::set_env(tbb::task_group_context const*) ./src/tbb/scheduler.h:694
+# tbb::internal::custom_scheduler<tbb::internal::IntelSchedulerTraits>::local_wait_for_all(tbb::task&, tbb::task*) ./src/tbb/custom_scheduler.h:421
+# tbb::internal::generic_scheduler::local_spawn_root_and_wait(tbb::task&, tbb::task*&) ./src/tbb/scheduler.cpp:676:5
+fun:*tbb*cpu_ctl_env*

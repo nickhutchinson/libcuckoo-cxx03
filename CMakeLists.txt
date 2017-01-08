@@ -3,6 +3,8 @@ project(libcuckoo LANGUAGES CXX)
 set (libcuckoo_VERSION_MAJOR 0)
 set (libcuckoo_VERSION_MINOR 2)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+
 include(CTest)
 
 set(CMAKE_CXX_STANDARD 98)
@@ -52,6 +54,11 @@ find_package(Boost REQUIRED COMPONENTS atomic chrono random system thread)
 include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
 link_libraries(${Boost_LIBRARIES})
 add_definitions(-DBOOST_THREAD_VERSION=4)
+
+find_package(TBB REQUIRED)
+add_definitions(${TBB_DEFINITIONS})
+include_directories(SYSTEM ${TBB_INCLUDE_DIRS})
+link_libraries(${TBB_LIBRARIES})
 
 if (CMAKE_SYSTEM_NAME MATCHES Linux)
   link_libraries(-lrt -pthread)

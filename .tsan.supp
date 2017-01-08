@@ -1,0 +1,3 @@
+# ThreadSanitizer suppressions file for libcuckoo.
+race:^tbb::interface*::internal::*
+race:^tbb::internal::*

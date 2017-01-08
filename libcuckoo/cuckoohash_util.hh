@@ -49,6 +49,24 @@
 #define LIBCUCKOO_FINAL
 #endif
 
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+
+#if __has_feature(thread_sanitizer)
+extern "C" {
+void AnnotateHappensAfter(const char* file, int line, const void* addr);
+void AnnotateHappensBefore(const char* file, int line, const void* addr);
+}
+#define LIBCUCKOO_ANNOTATE_HAPPENS_BEFORE(addr) \
+    AnnotateHappensBefore(__FILE__, __LINE__, addr)
+#define LIBCUCKOO_ANNOTATE_HAPPENS_AFTER(addr) \
+    AnnotateHappensAfter(__FILE__, __LINE__, addr)
+#else
+#define LIBCUCKOO_ANNOTATE_HAPPENS_BEFORE(addr)
+#define LIBCUCKOO_ANNOTATE_HAPPENS_AFTER(addr)
+#endif  // __has_feature(thread_sanitizer)
+
 /**
  * Thrown when an automatic expansion is triggered, but the load factor of the
  * table is below a minimum threshold, which can be set by the \ref

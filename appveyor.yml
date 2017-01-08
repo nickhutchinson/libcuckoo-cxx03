@@ -13,22 +13,22 @@ environment:
   matrix:
     - COMPILER: msvc-16
       TARGET: x86_64-pc-windows-msvc16.0.0
-      PATH: '%APPVEYOR_BUILD_FOLDER%\_deps\bin;%PATH%'
+      PATH: '%APPVEYOR_BUILD_FOLDER%\_deps\bin;%APPVEYOR_BUILD_FOLDER%\_deps\tbb44_20160803oss\bin\intel64\vc10;%PATH%'
       CC: cl
       CXX: cl
       VS: '"%ProgramFiles%\Microsoft SDKs\Windows\v7.1\Bin\SetEnv.cmd" /x64'
-      BOOST_INCLUDEDIR: '%APPVEYOR_BUILD_FOLDER%\_deps\boost_1_62_0-msvc-10.0-64'
-      BOOST_LIBRARYDIR: '%APPVEYOR_BUILD_FOLDER%\_deps\boost_1_62_0-msvc-10.0-64\lib64-msvc-10.0'
+      TBBROOT: '%APPVEYOR_BUILD_FOLDER%\_deps\tbb44_20160803oss'
+      BOOST_ROOT: '%APPVEYOR_BUILD_FOLDER%\_deps\boost_1_62_0-msvc-10.0-64'
       EXTRA_CMAKE_ARGS: '-DBoost_USE_STATIC_LIBS=1'
 
     - COMPILER: msvc-19
       TARGET: x86_64-pc-windows-msvc19.0.0
-      PATH: '%APPVEYOR_BUILD_FOLDER%\_deps\bin;%PATH%'
+      PATH: '%APPVEYOR_BUILD_FOLDER%\_deps\bin;%APPVEYOR_BUILD_FOLDER%\_deps\tbb44_20160803oss\bin\intel64\vc14;%PATH%'
       CC: cl
       CXX: cl
       VS: '"%ProgramFiles(x86)%\Microsoft Visual Studio 14.0\VC\vcvarsall.bat" amd64'
-      BOOST_INCLUDEDIR: 'c:\Libraries\boost_1_62_0'
-      BOOST_LIBRARYDIR: 'c:\Libraries\boost_1_62_0\lib64-msvc-14.0'
+      TBBROOT: '%APPVEYOR_BUILD_FOLDER%\_deps\tbb44_20160803oss'
+      BOOST_ROOT: 'c:\Libraries\boost_1_62_0'
       EXTRA_CMAKE_ARGS: '-DBoost_USE_STATIC_LIBS=1'
 
 install:

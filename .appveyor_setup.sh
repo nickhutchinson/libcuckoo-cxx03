@@ -42,6 +42,15 @@ if ! type ninja >/dev/null 2>&1; then
     popd
 fi
 
+if [[ ! -d "_deps/tbb44_20160803oss" ]]; then
+    mkdir -p _deps
+    pushd _deps
+    curl -fLO https://www.threadingbuildingblocks.org/sites/default/files/software_releases/windows/tbb44_20160803oss_win.zip
+    7z x tbb44_20160803oss_win.zip
+    rm tbb44_20160803oss_win.zip
+    popd
+fi
+
 if [[ $COMPILER =~ msvc-16 && ! -d "_deps/boost_1_62_0-msvc-10.0-64" ]]; then
     mkdir -p _deps
     pushd _deps

@@ -178,8 +178,8 @@ void resize_thread(AllEnvironment<KType> *env, size_t thread_seed) {
         env->table.rehash(hashpower + 1);
         env->table.rehash(hashpower / 2);
     } else {
-        env->table2.reserve((1U << (hashpower+1)) * LIBCUCKOO_DEFAULT_SLOT_PER_BUCKET);
-        env->table2.reserve((1U << hashpower) * LIBCUCKOO_DEFAULT_SLOT_PER_BUCKET);
+        env->table2.reserve((1ULL << (hashpower+1)) * LIBCUCKOO_DEFAULT_SLOT_PER_BUCKET);
+        env->table2.reserve((1ULL << hashpower) * LIBCUCKOO_DEFAULT_SLOT_PER_BUCKET);
     }
 }
 
@@ -299,7 +299,7 @@ int main(int argc, char** argv) {
     parse_flags(argc, argv, "Runs a stress test on inserts, deletes, and finds",
                 args, arg_vars, arg_help, sizeof(args)/sizeof(const char*),
                 flags, flag_vars, flag_help, sizeof(flags)/sizeof(const char*));
-    g_numkeys = 1U << g_power;
+    g_numkeys = 1ULL << g_power;
 
     if (g_use_strings) {
         auto *env = new AllEnvironment<KeyType2>;

@@ -3,7 +3,11 @@ project(libcuckoo LANGUAGES CXX)
 set (libcuckoo_VERSION_MAJOR 0)
 set (libcuckoo_VERSION_MINOR 2)
 
-if(NOT MSVC)
+if(MSVC)
+  add_compile_options(
+    -wd4503  # Suppress: 'X': decorated name length exceeded, name was truncated
+  )
+else()
   set(CMAKE_CXX_STANDARD 11)
   add_compile_options(
     -Wall

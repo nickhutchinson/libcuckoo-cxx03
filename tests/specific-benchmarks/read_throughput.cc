@@ -48,7 +48,7 @@ class ReadEnvironment {
 public:
     // We allocate the vectors with 2^power keys.
     ReadEnvironment()
-        : numkeys(1U<<g_power), table(numkeys), keys(numkeys), gen(seed_source) {
+        : numkeys(1ULL<<g_power), table(numkeys), keys(numkeys), gen(seed_source) {
         // Sets up the random number generator
         if (g_seed == 0) {
           std::cout << "seed = random" << std::endl;

@@ -10,7 +10,7 @@ constexpr size_t LIBCUCKOO_DEFAULT_SLOT_PER_BUCKET = 4;
 
 //! The default number of elements in an empty hash table
 constexpr size_t LIBCUCKOO_DEFAULT_SIZE =
-    (1U << 16) * LIBCUCKOO_DEFAULT_SLOT_PER_BUCKET;
+    (1ULL << 16) * LIBCUCKOO_DEFAULT_SLOT_PER_BUCKET;
 
 //! On a scale of 0 to 16, the memory granularity of the locks array. 0 is the
 //! least granular, meaning the array is a contiguous array and thus offers the

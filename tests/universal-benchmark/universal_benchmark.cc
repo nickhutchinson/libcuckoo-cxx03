@@ -231,7 +231,7 @@ int main(int argc, char** argv) {
 
         pcg64_oneseq_once_insecure base_rng(g_seed);
 
-        const size_t initial_capacity = 1UL << g_initial_capacity;
+        const size_t initial_capacity = 1ULL << g_initial_capacity;
         const size_t total_ops = initial_capacity * g_total_ops_percentage / 100;
 
         // Pre-generate an operation mix based on our percentages.
@@ -268,7 +268,7 @@ int main(int argc, char** argv) {
         // Round this quantity up to a power of 2, so that we can use an LCG to
         // cycle over the array "randomly".
         size_t insert_keys_per_thread = insert_keys / g_threads;
-        insert_keys_per_thread = 1UL << static_cast<size_t>(
+        insert_keys_per_thread = 1ULL << static_cast<size_t>(
             ceil(log2(static_cast<double>(insert_keys_per_thread))));
         std::vector<std::vector<uint64_t> > keys(g_threads);
         for (size_t i = 0; i < g_threads; ++i) {

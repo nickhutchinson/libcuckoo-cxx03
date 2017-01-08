@@ -122,7 +122,7 @@ using StringIntTable = cuckoohash_map<
 // Returns the number of slots the table has to store key-value pairs.
 template <class CuckoohashMap>
 size_t table_capacity(const CuckoohashMap& table) {
-    return CuckoohashMap::slot_per_bucket * (1U << table.hashpower());
+    return CuckoohashMap::slot_per_bucket * (1ULL << table.hashpower());
 }
 
 // Some unit tests need access into certain private data members of the table.

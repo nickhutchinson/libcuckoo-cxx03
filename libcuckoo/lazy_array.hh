@@ -22,8 +22,8 @@ class libcuckoo_lazy_array {
                   "The number of segment and offset bits cannot exceed "
                   " the number of bits in a size_t");
 private:
-    static constexpr size_t SEGMENT_SIZE = 1UL << OFFSET_BITS;
-    static constexpr size_t NUM_SEGMENTS = 1UL << SEGMENT_BITS;
+    static constexpr size_t SEGMENT_SIZE = 1ULL << OFFSET_BITS;
+    static constexpr size_t NUM_SEGMENTS = 1ULL << SEGMENT_BITS;
     // The segments array itself is mutable, so that the const subscript
     // operator can still add segments
     mutable std::array<T*, NUM_SEGMENTS> segments_;
@@ -39,7 +39,7 @@ private:
         return i >> OFFSET_BITS;
     }
 
-    static constexpr size_t OFFSET_MASK = ((1UL << OFFSET_BITS) - 1);
+    static constexpr size_t OFFSET_MASK = ((1ULL << OFFSET_BITS) - 1);
     inline size_t get_offset(size_t i) const {
         return i & OFFSET_MASK;
     }
@@ -156,7 +156,7 @@ public:
     //! The maximum number of elements the array can hold at full allocation.
     //! Note that \ref size is not the same thing as \ref allocated_size.
     static constexpr size_t size() {
-        return 1UL << (OFFSET_BITS + SEGMENT_BITS);
+        return 1ULL << (OFFSET_BITS + SEGMENT_BITS);
     }
 };
 

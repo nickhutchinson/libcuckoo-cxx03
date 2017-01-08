@@ -51,7 +51,7 @@ class InsertEnvironment {
     typedef typename T::key_type KType;
 public:
     InsertEnvironment()
-        : numkeys(1U << g_power),
+        : numkeys(1ULL << g_power),
           table(g_table_capacity ? g_table_capacity : numkeys), keys(numkeys),
           gen(seed_source) {
         // Sets up the random number generator

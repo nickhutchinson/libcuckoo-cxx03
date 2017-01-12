@@ -177,28 +177,57 @@ private:
     LIBCUCKOO_SQUELCH_PADDING_WARNING
     class BOOST_ALIGNMENT(64) spinlock {
     private:
-        BOOST_MOVABLE_BUT_NOT_COPYABLE(spinlock);
-        boost::atomic_flag lock_;
+        enum { READER = 2, WRITER = 1 };
+
+        boost::atomic<int32_t> lock_;
 
     public:
         boost::atomic<size_t> elems_in_buckets;
 
-        spinlock() : elems_in_buckets(0) {
-            lock_.clear();
+        spinlock() : lock_(0), elems_in_buckets(0) {}
+
+        // Lockable Concept
+        void lock() {
+            while (!BOOST_LIKELY(try_lock())) {
+                boost::this_thread::yield();
+            }
         }
 
-        inline void lock() {
-            while (lock_.test_and_set(boost::memory_order_acq_rel));
+        void unlock() {
+            if (lock_.load(boost::memory_order_relaxed) & WRITER) {
+                lock_.fetch_and(~WRITER, boost::memory_order_release);
+            } else {
+                lock_.fetch_add(-READER, boost::memory_order_release);
+            }
         }
 
-        inline void unlock() {
-            lock_.clear(boost::memory_order_release);
+        void lock_shared() {
+            while (!BOOST_LIKELY(try_lock_shared())) {
+                boost::this_thread::yield();
+            }
         }
 
-        inline bool try_lock() {
-            return !lock_.test_and_set(boost::memory_order_acq_rel);
+        // Attempt to acquire writer permission. Return false if we didn't get
+        // it.
+        bool try_lock() {
+            int32_t expect = 0;
+            return lock_.compare_exchange_strong(expect, WRITER,
+                                                 boost::memory_order_acq_rel);
         }
 
+        // Try to get reader permission on the lock. This can fail if we
+        // find out someone is a writer.
+        bool try_lock_shared() {
+            // fetch_add is considerably (100%) faster than compare_exchange,
+            // so here we are optimizing for the common (lock success) case.
+            int32_t value =
+                lock_.fetch_add(READER, boost::memory_order_acquire);
+            if (BOOST_UNLIKELY(value & WRITER)) {
+                lock_.fetch_add(-READER, boost::memory_order_release);
+                return false;
+            }
+            return true;
+        }
     };
 
     typedef enum {
@@ -496,7 +525,7 @@ public:
     template <typename K>
     bool find(const K& key, mapped_type& val) const {
         const hash_value hv = hashed_key(key);
-        const TwoBuckets b = snapshot_and_lock_two(hv);
+        const TwoBuckets b = snapshot_and_lock_two_shared(hv);
         const cuckoo_status st = cuckoo_find(key, val, hv.partial, b.i[0], b.i[1]);
         return (st == ok);
     }
@@ -520,7 +549,7 @@ public:
     template <typename K>
     bool contains(const K& key) const {
         const hash_value hv = hashed_key(key);
-        const TwoBuckets b = snapshot_and_lock_two(hv);
+        const TwoBuckets b = snapshot_and_lock_two_shared(hv);
         const bool result = cuckoo_contains(key, hv.partial, b.i[0], b.i[1]);
         return result;
     }
@@ -866,6 +895,21 @@ private:
         return TwoBuckets(this, i1, i2);
     }
 
+    TwoBuckets lock_two_shared(const size_t hp, const size_t i1,
+                               const size_t i2) const {
+        size_t l1 = lock_ind(i1);
+        size_t l2 = lock_ind(i2);
+        if (l2 < l1) {
+            std::swap(l1, l2);
+        }
+        locks_[l1].lock_shared();
+        check_hashpower(hp, l1);
+        if (l2 != l1) {
+            locks_[l2].lock_shared();
+        }
+        return TwoBuckets(this, i1, i2);
+    }
+
     // lock_two_one locks the three bucket indexes in numerical order, returning
     // the containers as a two (i1 and i2) and a one (i3). The one will not be
     // active if i3 shares a lock index with i1 or i2.
@@ -911,6 +955,22 @@ private:
             const size_t i2 = alt_index(hp, hv.partial, i1);
             try {
                 return lock_two(hp, i1, i2);
+            } catch (hashpower_changed&) {
+                // The hashpower changed while taking the locks. Try again.
+                continue;
+            }
+        }
+    }
+
+    TwoBuckets snapshot_and_lock_two_shared(const hash_value& hv) const
+        BOOST_NOEXCEPT_OR_NOTHROW {
+        while (true) {
+            // Store the current hashpower we're using to compute the buckets
+            const size_t hp = get_hashpower();
+            const size_t i1 = index_hash(hp, hv.hash);
+            const size_t i2 = alt_index(hp, hv.partial, i1);
+            try {
+                return lock_two_shared(hp, i1, i2);
             } catch (hashpower_changed&) {
                 // The hashpower changed while taking the locks. Try again.
                 continue;

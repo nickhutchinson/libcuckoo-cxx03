@@ -326,28 +326,6 @@ private:
     // The type of the expansion lock
     typedef boost::mutex expansion_lock_t;
 
-    // cacheint is a cache-aligned atomic integer type.
-    LIBCUCKOO_SQUELCH_PADDING_WARNING
-    struct BOOST_ALIGNMENT(64) cacheint {
-        boost::atomic<size_t> num;
-
-        cacheint(): num(0) {}
-        cacheint(size_t x): num(x) {}
-        cacheint(const cacheint& x): num(x.num.load()) {}
-        cacheint(BOOST_RV_REF(cacheint) x) : num(x.num.load()) {}
-        cacheint& operator=(BOOST_COPY_ASSIGN_REF(cacheint) x) {
-            num = x.num.load();
-            return *this;
-        }
-        cacheint& operator=(BOOST_RV_REF(cacheint) x) {
-            num = x.num.load();
-            return *this;
-        }
-
-    private:
-        BOOST_COPYABLE_AND_MOVABLE(cacheint);
-    };
-
     // Helper methods to read and write hashpower_ with the correct memory
     // barriers
     size_t get_hashpower() const {

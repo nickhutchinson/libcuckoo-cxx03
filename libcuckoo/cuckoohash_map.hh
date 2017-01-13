@@ -31,7 +31,6 @@
 #include <boost/lexical_cast.hpp>
 #include <boost/move/move.hpp>
 #include <boost/ref.hpp>
-#include <boost/shared_ptr.hpp>
 #include <boost/static_assert.hpp>
 #include <boost/thread.hpp>
 #include <boost/tuple/tuple.hpp>
@@ -138,7 +137,9 @@ public:
         // private constructor which initializes the owner and key
         reference(
             cuckoohash_map<Key, T, Hash, Pred, Alloc, slot_per_bucket>& owner,
-            const key_type& key) : owner_(owner), key_(key) {}
+            const key_type& key)
+            BOOST_NOEXCEPT_OR_NOTHROW
+            : owner_(owner), key_(key) {}
 
         // reference to the hash map instance
         cuckoohash_map<Key, T, Hash, Pred, Alloc, slot_per_bucket>& owner_;
@@ -180,7 +181,7 @@ private:
     public:
         boost::atomic<size_t> elems_in_buckets;
 
-        spinlock() : elems_in_buckets(0) {}
+        spinlock() BOOST_NOEXCEPT_OR_NOTHROW : elems_in_buckets(0) {}
 
         void lock_shared() {
             lock_.lock_read();
@@ -231,11 +232,7 @@ private:
             kvpairs_;
 
     public:
-        const partial_t& partial(size_t ind) const {
-            return partials_[ind];
-        }
-
-        partial_t& partial(size_t ind) {
+        partial_t partial(size_t ind) const {
             return partials_[ind];
         }
 
@@ -273,7 +270,7 @@ private:
         template <typename K, typename V>
         void setKV(allocator_type& alloc, size_t ind, partial_t p,
                    BOOST_FWD_REF(K) k, BOOST_FWD_REF(V) v) {
-            partial(ind) = p;
+            partials_[ind] = p;
             occupied_[ind] = true;
             boost::container::allocator_traits<allocator_type>::construct(
                 alloc, &storage_kvpair(ind), boost::forward<K>(k),
@@ -294,10 +291,9 @@ private:
         }
 
         // Moves the item in b1[slot1] into b2[slot2] without copying
-        static void move_to_bucket(
-            allocator_type& alloc,
-            Bucket& b1, size_t slot1,
-            Bucket& b2, size_t slot2) {
+        static void move_to_bucket(allocator_type& alloc,
+                                   Bucket& b1, size_t slot1,
+                                   Bucket& b2, size_t slot2) {
             assert(b1.occupied(slot1));
             assert(!b2.occupied(slot2));
             storage_value_type& tomove = b1.storage_kvpair(slot1);
@@ -369,28 +365,27 @@ public:
                    const hasher& hf = hasher(),
                    const key_equal& eql = key_equal(),
                    const allocator_type& alloc = allocator_type())
-        : hash_fn(hf), eq_fn(eql), pair_allocator_(alloc) {
-        minimum_load_factor(mlf);
-        maximum_hashpower(mhp);
-        const size_t hp = reserve_calc(n);
-        if (mhp != LIBCUCKOO_NO_MAXIMUM_HASHPOWER && hp > mhp) {
+        : hashpower_(reserve_calc(n)), buckets_(hashsize(hashpower())),
+          locks_(std::min(locks_t::size(), hashsize(hashpower()))),
+          expansion_lock_(), minimum_load_factor_(mlf), maximum_hashpower_(mhp),
+          hash_fn(hf), eq_fn(eql), pair_allocator_(alloc) {
+        if (maximum_hashpower() != LIBCUCKOO_NO_MAXIMUM_HASHPOWER &&
+            hashpower() > maximum_hashpower()) {
             throw std::invalid_argument(
                 "hashpower for initial size " +
-                boost::lexical_cast<std::string>(hp) +
+                boost::lexical_cast<std::string>(hashpower()) +
                 " is greater than the maximum hashpower");
         }
-        set_hashpower(hp);
-        buckets_.resize(hashsize(hp));
-        locks_.allocate(std::min(locks_t::size(), hashsize(hp)));
     }
 
-    ~cuckoohash_map() {
+    ~cuckoohash_map()
+        BOOST_NOEXCEPT_IF(boost::is_nothrow_destructible<Bucket>::value) {
         cuckoo_clear();
     }
 
     //! clear removes all the elements in the hash table, calling their
     //! destructors.
-    void clear() BOOST_NOEXCEPT_OR_NOTHROW {
+    void clear() {
         AllUnlocker unlocker = snapshot_and_lock_all();
         cuckoo_clear();
     }
@@ -398,29 +393,29 @@ public:
     //! size returns the number of items currently in the hash table. Since it
     //! doesn't lock the table, elements can be inserted during the computation,
     //! so the result may not necessarily be exact.
-    size_t size() const BOOST_NOEXCEPT_OR_NOTHROW {
+    size_t size() const {
         return cuckoo_size();
     }
 
     //! empty returns true if the table is empty.
-    bool empty() const BOOST_NOEXCEPT_OR_NOTHROW {
+    bool empty() const {
         return size() == 0;
     }
 
     //! hashpower returns the hashpower of the table, which is
     //! log<SUB>2</SUB>(the number of buckets).
-    size_t hashpower() const BOOST_NOEXCEPT_OR_NOTHROW {
+    size_t hashpower() const {
         return get_hashpower();
     }
 
     //! bucket_count returns the number of buckets in the table.
-    size_t bucket_count() const BOOST_NOEXCEPT_OR_NOTHROW {
+    size_t bucket_count() const {
         return hashsize(get_hashpower());
     }
 
     //! load_factor returns the ratio of the number of items in the table to the
     //! total number of available slots in the table.
-    double load_factor() const BOOST_NOEXCEPT_OR_NOTHROW {
+    double load_factor() const {
         return cuckoo_loadfactor(get_hashpower());
     }
 
@@ -438,12 +433,12 @@ public:
             throw std::invalid_argument("load factor " +
                                         boost::lexical_cast<std::string>(mlf) +
                                         " cannot be "
-                                        " less than 0");
+                                        "less than 0");
         } else if (mlf > 1.0) {
             throw std::invalid_argument("load factor " +
                                         boost::lexical_cast<std::string>(mlf) +
                                         " cannot be "
-                                        " greater than 1");
+                                        "greater than 1");
         }
         minimum_load_factor_.store(mlf, boost::memory_order_release);
     }
@@ -451,24 +446,31 @@ public:
     /**
      * @return the minimum load factor of the table
      */
-    double minimum_load_factor() BOOST_NOEXCEPT_OR_NOTHROW {
+    double minimum_load_factor() {
         return minimum_load_factor_.load(boost::memory_order_acquire);
     }
 
     /**
      * Sets the maximum hashpower the table can be. If set to \ref
-     * NO_MAXIMUM_HASHPOWER, there will be no limit on the hashpower.
+     * LIBCUCKOO_NO_MAXIMUM_HASHPOWER, there will be no limit on the hashpower.
      *
      * @param mhp the hashpower to set the maximum to
+     * @throw std::invalid_argument if the current hashpower exceeds the limit
      */
-    void maximum_hashpower(size_t mhp) BOOST_NOEXCEPT_OR_NOTHROW {
+    void maximum_hashpower(size_t mhp) {
+        if (mhp != LIBCUCKOO_NO_MAXIMUM_HASHPOWER && hashpower() > mhp) {
+            throw std::invalid_argument("maximum hashpower " +
+                                        boost::lexical_cast<std::string>(mhp) +
+                                        " is less than "
+                                        "current hashpower");
+        }
         maximum_hashpower_.store(mhp, boost::memory_order_release);
     }
 
     /**
      * @return the maximum hashpower of the table
      */
-    size_t maximum_hashpower() BOOST_NOEXCEPT_OR_NOTHROW {
+    size_t maximum_hashpower() {
         return maximum_hashpower_.load(boost::memory_order_acquire);
     }
 
@@ -641,17 +643,17 @@ public:
     }
 
     //! hash_function returns the hash function object used by the table.
-    hasher hash_function() const BOOST_NOEXCEPT_OR_NOTHROW {
+    hasher hash_function() const {
         return hash_fn;
     }
 
     //! key_eq returns the equality predicate object used by the table.
-    key_equal key_eq() const BOOST_NOEXCEPT_OR_NOTHROW {
+    key_equal key_eq() const {
         return eq_fn;
     }
 
     //! get_allocator returns the allocator object used by the table.
-    allocator_type get_allocator() const BOOST_NOEXCEPT_OR_NOTHROW {
+    allocator_type get_allocator() const {
         return pair_allocator_;
     }
 
@@ -716,14 +718,16 @@ private:
         const cuckoohash_map* map;
         boost::array<size_t, N> i;
 
-        BucketContainer() : map(NULL), i() {}
+        BucketContainer() BOOST_NOEXCEPT_OR_NOTHROW : map(NULL), i() {}
 
         BucketContainer(const cuckoohash_map* _map, size_t i0)
+            BOOST_NOEXCEPT_OR_NOTHROW
             : map(_map), i() {
             i[0] = i0;
         }
 
         BucketContainer(const cuckoohash_map* _map, size_t i0, size_t i1)
+            BOOST_NOEXCEPT_OR_NOTHROW
             : map(_map), i() {
             i[0] = i0;
             i[1] = i1;
@@ -738,11 +742,13 @@ private:
         }
 
         // Moving will not invalidate the bucket bucket indices
-        BucketContainer(BOOST_RV_REF(BucketContainer) bp) {
+        BucketContainer(BOOST_RV_REF(BucketContainer) bp)
+            BOOST_NOEXCEPT_OR_NOTHROW {
             *this = boost::move(bp);
         }
 
-        BucketContainer& operator=(BOOST_RV_REF(BucketContainer) bp) {
+        BucketContainer& operator=(BOOST_RV_REF(BucketContainer) bp)
+            BOOST_NOEXCEPT_OR_NOTHROW {
             map = bp.map;
             i = bp.i;
             bp.map = NULL;
@@ -758,7 +764,7 @@ private:
             return map != NULL;
         }
 
-        ~BucketContainer() {
+        ~BucketContainer() BOOST_NOEXCEPT_OR_NOTHROW {
             if (map) {
                 unlock(i);
             }
@@ -898,8 +904,8 @@ private:
     // hash value will stay correct as long as the locks are held. It returns
     // the bucket indices associated with the hash value and the current
     // hashpower.
-    TwoBuckets snapshot_and_lock_two(const hash_value& hv) const
-        BOOST_NOEXCEPT_OR_NOTHROW {
+    TwoBuckets
+    snapshot_and_lock_two(const hash_value& hv) const {
         while (true) {
             // Store the current hashpower we're using to compute the buckets
             const size_t hp = get_hashpower();
@@ -939,19 +945,30 @@ private:
         // If NULL, do nothing
         locks_t* locks_;
     public:
-        AllUnlocker(locks_t* locks): locks_(locks) {}
+        AllUnlocker() BOOST_NOEXCEPT_OR_NOTHROW : locks_(NULL) {}
+        AllUnlocker(locks_t* locks) BOOST_NOEXCEPT_OR_NOTHROW : locks_(locks) {}
 
-        AllUnlocker(BOOST_RV_REF(AllUnlocker) au) : locks_(au.locks_) {
-            au.locks_ = NULL;
+        AllUnlocker(BOOST_RV_REF(AllUnlocker) au) BOOST_NOEXCEPT_OR_NOTHROW
+            : locks_(au.locks_) {
+            au.deactivate();
         }
 
-        AllUnlocker& operator=(BOOST_RV_REF(AllUnlocker) au) {
+        ~AllUnlocker() BOOST_NOEXCEPT_OR_NOTHROW {
+            release();
+        }
+
+        AllUnlocker& operator=(BOOST_RV_REF(AllUnlocker) au)
+            BOOST_NOEXCEPT_OR_NOTHROW {
             locks_ = au.locks_;
-            au.locks_ = NULL;
+            au.deactivate();
         }
 
         void deactivate() {
             locks_ = NULL;
+        }
+
+        bool is_active() const {
+            return locks_ != NULL;
         }
 
         void release() {
@@ -963,16 +980,13 @@ private:
             }
         }
 
-        ~AllUnlocker() {
-            release();
-        }
     };
 
     // snapshot_and_lock_all takes all the locks, and returns a deleter object
     // that releases the locks upon destruction. Note that after taking all the
     // locks, it is okay to change the buckets_ vector and the hashpower_, since
     // no other threads should be accessing the buckets.
-    AllUnlocker snapshot_and_lock_all() const BOOST_NOEXCEPT_OR_NOTHROW {
+    AllUnlocker snapshot_and_lock_all() const {
         for (size_t i = 0; i < locks_.allocated_size(); ++i) {
             locks_[i].lock();
         }
@@ -1094,7 +1108,7 @@ private:
         }
 
     public:
-        b_queue() : first(0), last(0) {}
+        b_queue() BOOST_NOEXCEPT_OR_NOTHROW : first(0), last(0) {}
 
         void enqueue(b_slot x) {
             assert(!full());
@@ -1695,7 +1709,7 @@ private:
     // cuckoo_clear empties the table, calling the destructors of all the
     // elements it removes from the table. It assumes the locks are taken as
     // necessary.
-    cuckoo_status cuckoo_clear() BOOST_NOEXCEPT_OR_NOTHROW {
+    cuckoo_status cuckoo_clear() {
         for (size_t i = 0; i < buckets_.size(); ++i) {
             buckets_[i].clear();
         }
@@ -1706,7 +1720,7 @@ private:
     }
 
     // cuckoo_size returns the number of elements in the given table.
-    size_t cuckoo_size() const BOOST_NOEXCEPT_OR_NOTHROW {
+    size_t cuckoo_size() const {
         size_t size = 0;
         for (size_t i = 0; i < locks_.allocated_size(); ++i)
             size +=
@@ -1715,7 +1729,7 @@ private:
     }
 
     // cuckoo_loadfactor returns the load factor of the given table.
-    double cuckoo_loadfactor(const size_t hp) const BOOST_NOEXCEPT_OR_NOTHROW {
+    double cuckoo_loadfactor(const size_t hp) const {
         return (static_cast<double>(cuckoo_size()) / slot_per_bucket /
                 hashsize(hp));
     }
@@ -1987,65 +2001,56 @@ public:
         AllUnlocker unlocker_;
         // A reference to the buckets owned by the table
         boost::reference_wrapper<buckets_t> buckets_;
-        // A boolean shared to all iterators, indicating whether the
-        // locked_table has ownership of the hashtable or not.
-        boost::shared_ptr<bool> has_table_lock_;
 
         // The constructor locks the entire table, retrying until
         // snapshot_and_lock_all succeeds. We keep this constructor private (but
         // expose it to the cuckoohash_map class), since we don't want users
         // calling it.
-        locked_table(
-            cuckoohash_map<Key, T, Hash, Pred, Alloc, SLOT_PER_BUCKET>& hm)
+        locked_table(cuckoohash_map<Key, T, Hash, Pred, Alloc,
+                     SLOT_PER_BUCKET>& hm)
+            BOOST_NOEXCEPT_OR_NOTHROW
             : unlocker_(hm.snapshot_and_lock_all()),
-              buckets_(hm.buckets_),
-              has_table_lock_(new bool(true)) {}
+              buckets_(hm.buckets_) {}
 
     public:
         //! Move constructor for a locked table
         locked_table(BOOST_RV_REF(locked_table) lt)
+            BOOST_NOEXCEPT_OR_NOTHROW
             : unlocker_(boost::move(lt.unlocker_)),
-              buckets_(boost::move(lt.buckets_)),
-              has_table_lock_(boost::move(lt.has_table_lock_)) {
-            lt.has_table_lock_.reset();  // workaround for no boost::move
-                                         // support in boost::shared_ptr.
+              buckets_(boost::move(lt.buckets_)) {}
+
+        ~locked_table() BOOST_NOEXCEPT_OR_NOTHROW {
+            release();
         }
 
         //! Move assignment for a locked table
-        locked_table& operator=(BOOST_RV_REF(locked_table) lt) {
+        locked_table& operator=(BOOST_RV_REF(locked_table) lt)
+            BOOST_NOEXCEPT_OR_NOTHROW {
             release();
             unlocker_ = boost::move(lt.unlocker_);
             buckets_ = boost::move(lt.buckets_);
-            has_table_lock_ = boost::move(lt.has_table_lock_);
-            lt.has_table_lock_.reset();  // workaround for no boost::move
-                                         // support in boost::shared_ptr.
             return *this;
         }
 
         //! Returns true if the locked table still has ownership of the
         //! hashtable, false otherwise.
-        bool has_table_lock() const BOOST_NOEXCEPT_OR_NOTHROW {
-            return has_table_lock_ && *has_table_lock_;
+        bool is_active() const {
+            return unlocker_.is_active();
         }
 
         //! release unlocks the table, thereby freeing it up for other
         //! operations, but also invalidating all iterators and future
         //! operations with this table. It is idempotent.
-        void release() BOOST_NOEXCEPT_OR_NOTHROW {
-            if (has_table_lock()) {
+        void release() {
+            if (is_active()) {
                 unlocker_.release();
-                *has_table_lock_ = false;
             }
         }
 
-        ~locked_table() {
-            release();
-        }
-
     private:
-        //! A templated iterator whose implementation works for both const and
-        //! non_const iterators. It is an STL-style BidirectionalIterator that
-        //! can be used to iterate over a locked table.
+        // A templated iterator whose implementation works for both const and
+        // non_const iterators. It is an STL-style BidirectionalIterator that
+        // can be used to iterate over a locked table.
         template <bool IS_CONST>
         class templated_iterator :
             public std::iterator<std::bidirectional_iterator_tag, value_type> {
@@ -2057,10 +2062,6 @@ public:
             // over.
             boost::reference_wrapper<maybe_const_buckets_t> buckets_;
 
-            // The shared boolean indicating whether the iterator points to a
-            // still-locked table or not. It should never be nullptr.
-            boost::shared_ptr<bool> has_table_lock_;
-
             // The bucket index of the item being pointed to. For implementation
             // convenience, we let it take on negative values.
             intmax_t index_;
@@ -2070,27 +2071,22 @@ public:
 
         public:
             //! Return true if the iterators are from the same locked table and
-            //! location, false otherwise. This will return false if either of
-            //! the iterators has lost ownership of its table.
+            //! location, false otherwise.
             template <bool OTHER_CONST>
-            bool operator==(const templated_iterator<OTHER_CONST>& it) const
-                BOOST_NOEXCEPT_OR_NOTHROW {
-                return (*has_table_lock_ && *it.has_table_lock_
-                        && &buckets_.get() == &it.buckets_.get()
+            bool operator==(const templated_iterator<OTHER_CONST>& it) const {
+                return (&buckets_.get() == &it.buckets_.get()
                         && index_ == it.index_ && slot_ == it.slot_);
             }
 
             //! Equivalent to !operator==(it)
             template <bool OTHER_CONST>
-            bool operator!=(const templated_iterator<OTHER_CONST>& it) const
-                BOOST_NOEXCEPT_OR_NOTHROW {
+            bool operator!=(const templated_iterator<OTHER_CONST>& it) const {
                 return !(operator==(it));
             }
 
             //! Return the key-value pair pointed to by the iterator. Behavior
             //! is undefined if the iterator is at the end.
             const value_type& operator*() const {
-                check_iterator();
                 return buckets_.get()[index_].kvpair(slot_);
             }
 
@@ -2100,7 +2096,6 @@ public:
             typename boost::conditional<IS_CONST, const value_type&,
                                         value_type&>::type
             operator*() {
-                check_iterator();
                 return buckets_.get()[static_cast<size_t>(index_)].
                     kvpair(static_cast<size_t>(slot_));
             }
@@ -2109,18 +2104,15 @@ public:
             //! the iterator. Behavior is undefined if the iterator is at the
             //! end.
             const value_type* operator->() const {
-                check_iterator();
                 return &buckets_.get()[index_].kvpair(slot_);
             }
 
             //! Returns a mutable pointer to the current key-value pair pointed
             //! to by the iterator. Behavior is undefined if the iterator is at
             //! the end.
-
             typename boost::conditional<IS_CONST, const value_type*,
                                         value_type*>::type
             operator->() {
-                check_iterator();
                 return &buckets_.get()[index_].kvpair(slot_);
             }
 
@@ -2131,7 +2123,6 @@ public:
             templated_iterator& operator++() {
                 // Move forward until we get to a slot that is occupied, or we
                 // get to the end
-                check_iterator();
                 for (; static_cast<size_t>(index_) < buckets_.get().size();
                      ++index_) {
                     while (static_cast<size_t>(++slot_) < SLOT_PER_BUCKET) {
@@ -2162,7 +2153,6 @@ public:
             templated_iterator& operator--() {
                 // Move backward until we get to the beginning. If we try to
                 // move before that, we stop.
-                check_iterator();
                 for (; index_ >= 0; --index_) {
                     while (--slot_ >= 0) {
                         if (buckets_.get()[static_cast<size_t>(index_)]
@@ -2205,30 +2195,19 @@ public:
             // iterators from scratch. If the given index_-slot_ pair is at the
             // end of the table, or that spot is occupied, stay. Otherwise, step
             // forward to the next data item, or to the end of the table.
-            templated_iterator(maybe_const_buckets_t& buckets,
-                               boost::shared_ptr<bool> has_table_lock,
-                               size_t index, size_t slot)
+            templated_iterator(maybe_const_buckets_t& buckets, size_t index,
+                               size_t slot) BOOST_NOEXCEPT_OR_NOTHROW
                 : buckets_(buckets),
-                  has_table_lock_(has_table_lock),
                   index_(static_cast<intmax_t>(index)),
                   slot_(static_cast<intmax_t>(slot)) {
                 if (std::make_pair(index_, slot_) != end_pos(buckets) &&
-                    !buckets[static_cast<size_t>(index_)]
-                    .occupied(static_cast<size_t>(slot_))) {
+                    !buckets[static_cast<size_t>(index_)].occupied(
+                        static_cast<size_t>(slot_))) {
                     operator++();
                 }
             }
 
-            // Throws an exception if the iterator has been invalidated because
-            // the locked_table lost ownership of the table info.
-            void check_iterator() const {
-                if (!(*has_table_lock_)) {
-                    throw std::runtime_error("Iterator has been invalidated");
-                }
-            }
-
-            friend class cuckoohash_map<Key, T, Hash, Pred,
-                                        Alloc, SLOT_PER_BUCKET>;
+            friend class cuckoohash_map<Key, T, Hash, Pred, Alloc, SLOT_PER_BUCKET>;
         };
 
     public:
@@ -2240,13 +2219,13 @@ public:
         //! begin returns an iterator to the beginning of the table
         iterator begin() {
             check_table();
-            return iterator(buckets_.get(), has_table_lock_, 0, 0);
+            return iterator(buckets_.get(), 0, 0);
         }
 
         //! begin returns a const_iterator to the beginning of the table
         const_iterator begin() const {
             check_table();
-            return const_iterator(buckets_.get(), has_table_lock_, 0, 0);
+            return const_iterator(buckets_.get(), 0, 0);
         }
 
         //! cbegin returns a const_iterator to the beginning of the table
@@ -2259,7 +2238,7 @@ public:
             check_table();
             const std::pair<intmax_t, intmax_t> end_pos =
                 const_iterator::end_pos(buckets_.get());
-            return iterator(buckets_.get(), has_table_lock_,
+            return iterator(buckets_.get(),
                             static_cast<size_t>(end_pos.first),
                             static_cast<size_t>(end_pos.second));
         }
@@ -2269,7 +2248,7 @@ public:
             check_table();
             const std::pair<intmax_t, intmax_t> end_pos =
                 const_iterator::end_pos(buckets_.get());
-            return const_iterator(buckets_.get(), has_table_lock_,
+            return const_iterator(buckets_.get(),
                                   static_cast<size_t>(end_pos.first),
                                   static_cast<size_t>(end_pos.second));
         }
@@ -2285,9 +2264,8 @@ public:
         // Throws an exception if the locked_table has been invalidated because
         // it lost ownership of the table info.
         void check_table() const {
-            if (!has_table_lock()) {
-                throw std::runtime_error(
-                    "locked_table lost ownership of table");
+            if (!is_active()) {
+                throw std::runtime_error("locked_table lost ownership of table");
             }
         }
 

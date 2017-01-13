@@ -10,8 +10,9 @@
 
 #include <boost/array.hpp>
 #include <boost/config.hpp>
-#include <boost/move/move.hpp>
 #include <boost/container/allocator_traits.hpp>
+#include <boost/move/move.hpp>
+#include <boost/type_traits.hpp>
 
 #include "cuckoohash_util.hh"
 
@@ -87,20 +88,25 @@ private:
     BOOST_MOVABLE_BUT_NOT_COPYABLE(libcuckoo_lazy_array);
 
 public:
-    libcuckoo_lazy_array(): segments_() {}
+    libcuckoo_lazy_array() BOOST_NOEXCEPT_OR_NOTHROW : segments_() {}
+    libcuckoo_lazy_array(size_t target): segments_() { allocate(target); }
 
     //! Move constructor for a lazy array
-    libcuckoo_lazy_array(BOOST_RV_REF(libcuckoo_lazy_array) arr) : segments_() {
+    libcuckoo_lazy_array(BOOST_RV_REF(libcuckoo_lazy_array) arr)
+        BOOST_NOEXCEPT_IF(boost::is_nothrow_destructible<T>::value)
+        : segments_() {
         move_other_array(boost::move(arr));
     }
 
     //! Move assignment for a lazy array
-    libcuckoo_lazy_array& operator=(BOOST_RV_REF(libcuckoo_lazy_array) arr) {
+    libcuckoo_lazy_array& operator=(BOOST_RV_REF(libcuckoo_lazy_array) arr)
+        BOOST_NOEXCEPT_IF(boost::is_nothrow_destructible<T>::value) {
         move_other_vector(boost::move(arr));
         return *this;
     }
 
-    ~libcuckoo_lazy_array() {
+    ~libcuckoo_lazy_array()
+        BOOST_NOEXCEPT_IF(boost::is_nothrow_destructible<T>::value) {
         clear();
     }
 

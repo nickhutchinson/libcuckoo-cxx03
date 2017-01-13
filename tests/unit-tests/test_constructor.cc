@@ -53,7 +53,7 @@ struct CustomHashFn {
 
 TEST_CASE("custom hasher", "[constructor]") {
     cuckoohash_map<size_t, size_t, CustomHashFn> map(
-        LIBCUCKOO_DEFAULT_SIZE, LIBCUCKOO_DEFAULT_MINIMUM_LOAD_FACTOR, LIBCUCKOO_NO_MAXIMUM_HASHPOWER);
+        LIBCUCKOO_DEFAULT_SIZE);
     for (int i = 0; i < 1000; ++i) {
         REQUIRE(map.hash_function()(i) == 0);
     }
@@ -67,8 +67,7 @@ struct CustomEqFn {
 
 TEST_CASE("custom equality", "[constructor]") {
     cuckoohash_map<size_t, size_t, boost::hash<size_t>, CustomEqFn> map(
-        LIBCUCKOO_DEFAULT_SIZE, LIBCUCKOO_DEFAULT_MINIMUM_LOAD_FACTOR, LIBCUCKOO_NO_MAXIMUM_HASHPOWER,
-        boost::hash<size_t>(), CustomEqFn());
+        LIBCUCKOO_DEFAULT_SIZE, boost::hash<size_t>(), CustomEqFn());
 
     for (int i = 0; i < 1000; ++i) {
         REQUIRE(map.key_eq()(i, i) == false);
@@ -94,8 +93,7 @@ TEST_CASE("custom allocator", "[constructor]") {
 
     cuckoohash_map<int, int, boost::hash<int>, std::equal_to<int>,
                    StatefulAllocator<value_type> > tbl2(
-                       LIBCUCKOO_DEFAULT_SIZE, LIBCUCKOO_DEFAULT_MINIMUM_LOAD_FACTOR,
-                       LIBCUCKOO_NO_MAXIMUM_HASHPOWER, boost::hash<int>(),
+                       LIBCUCKOO_DEFAULT_SIZE, boost::hash<int>(),
                        std::equal_to<int>(), alloc);
     REQUIRE(tbl2.get_allocator().state == 10);
 }

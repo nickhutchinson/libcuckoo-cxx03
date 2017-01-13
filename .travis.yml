@@ -77,8 +77,8 @@ matrix:
         - COMPILER=clang++-3.8
         - C_COMPILER=clang-3.8
         - BUILD_TYPE=Debug
-        - CFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=undefined,address -fno-sanitize=vptr"
-        - CXXFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=undefined,address -fno-sanitize=vptr"
+        - CFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=undefined,address -fno-sanitize=vptr,function"
+        - CXXFLAGS="-fno-omit-frame-pointer -O1 -g -fsanitize=undefined,address -fno-sanitize=vptr,function"
         - UBSAN_OPTIONS=print_stacktrace=1
       addons:
         apt:

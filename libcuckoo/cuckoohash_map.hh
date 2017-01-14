@@ -814,9 +814,9 @@ private:
     // locks the given bucket index.
     //
     // throws hashpower_changed if it changed after taking the lock.
-    inline OneBucket lock_one(const size_t hp, const size_t i) const {
+    inline OneBucket lock_one_shared(const size_t hp, const size_t i) const {
         const size_t l = lock_ind(i);
-        locks_[l].lock();
+        locks_[l].lock_shared();
         check_hashpower(hp, l);
         return OneBucket(this, i);
     }
@@ -1140,7 +1140,7 @@ private:
             for (size_t i = 0; i < slot_per_bucket && !q.full();
                  ++i) {
                 size_t slot = (starting_slot + i) % slot_per_bucket;
-                OneBucket ob = lock_one(hp, x.bucket);
+                OneBucket ob = lock_one_shared(hp, x.bucket);
                 Bucket& b = buckets_[x.bucket];
                 if (!b.occupied(slot)) {
                     // We can terminate the search here
@@ -1197,7 +1197,7 @@ private:
             first.bucket = i2;
         }
         {
-            const OneBucket ob = lock_one(hp, first.bucket);
+            const OneBucket ob = lock_one_shared(hp, first.bucket);
             const Bucket& b = buckets_[first.bucket];
             if (!b.occupied(first.slot)) {
                 // We can terminate here
@@ -1214,7 +1214,7 @@ private:
             // We get the bucket that this slot is on by computing the alternate
             // index of the previous bucket
             curr.bucket = alt_index(hp, prev.hv.partial, prev.bucket);
-            const OneBucket ob = lock_one(hp, curr.bucket);
+            const OneBucket ob = lock_one_shared(hp, curr.bucket);
             const Bucket& b = buckets_[curr.bucket];
             if (!b.occupied(curr.slot)) {
                 // We can terminate here

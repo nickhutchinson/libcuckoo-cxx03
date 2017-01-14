@@ -15,10 +15,10 @@ fi
 if [[ ! -x .deps/bin/cmake ]]; then
     mkdir -p .deps
     pushd .deps
-    curl -fLO https://cmake.org/files/v3.6/cmake-3.6.3-Linux-x86_64.tar.gz
-    tar -xf cmake-3.6.3-Linux-x86_64.tar.gz --strip-components=1
+    curl -fLO https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz
+    tar -xf cmake-3.7.2-Linux-x86_64.tar.gz --strip-components=1
     cmake --version
-    rm cmake-3.6.3-Linux-x86_64.tar.gz
+    rm cmake-3.7.2-Linux-x86_64.tar.gz
     popd
 fi
 

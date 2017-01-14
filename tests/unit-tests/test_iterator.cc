@@ -18,8 +18,6 @@ TEST_CASE("empty table iteration", "[iterator]") {
     IntIntTable table;
     {
         IntIntTable::locked_table lt = table.lock_table();
-        IntIntTable::locked_table::iterator it = lt.begin();
-
         REQUIRE(lt.begin() == lt.begin());
         REQUIRE(lt.begin() == lt.end());
 
@@ -44,14 +42,14 @@ TEST_CASE("iterator release", "[iterator]") {
     IntIntTable table;
     table.insert(10, 10);
 
-    SECTION("explicit release") {
+    SECTION("explicit unlock") {
         IntIntTable::locked_table lt = table.lock_table();
         IntIntTable::locked_table::iterator it = lt.begin();
-        lt.release();
+        lt.unlock();
         AssertLockedTableIsReleased(lt);
     }
 
-    SECTION("release through destructor") {
+    SECTION("unlock through destructor") {
         boost::aligned_storage<sizeof(IntIntTable::locked_table),
                                boost::alignment::alignment_of<
                                    IntIntTable::locked_table>::value>::type
@@ -62,7 +60,7 @@ TEST_CASE("iterator release", "[iterator]") {
         IntIntTable::locked_table::iterator it = lt_ref.begin();
         lt_ref.IntIntTable::locked_table::~locked_table();
         AssertLockedTableIsReleased(lt_ref);
-        lt_ref.release();
+        lt_ref.unlock();
         AssertLockedTableIsReleased(lt_ref);
     }
 
@@ -73,7 +71,7 @@ TEST_CASE("iterator release", "[iterator]") {
         REQUIRE(it1 == it2);
         IntIntTable::locked_table lt2(boost::move(lt1));
         REQUIRE(it1 == it2);
-        lt2.release();
+        lt2.unlock();
     }
 }
 
@@ -175,8 +173,22 @@ TEST_CASE("lock table blocks inserts", "[iterator]") {
     boost::thread thread(ThreadFn, &table);
     boost::this_thread::sleep_for(boost::chrono::milliseconds(100));
     REQUIRE(table.size() == 0);
-    lt.release();
+    lt.unlock();
     thread.join();
 
     REQUIRE(table.size() == 10);
+}
+
+TEST_CASE("Cast iterator to const iterator", "[iterator]") {
+    IntIntTable table;
+    for (int i = 0; i < 10; ++i) {
+        table.insert(i, i);
+    }
+    IntIntTable::locked_table lt = table.lock_table();
+    for (IntIntTable::locked_table::iterator it = lt.begin(); it != lt.end(); ++it) {
+        REQUIRE(it->first == it->second);
+        it->second++;
+        IntIntTable::locked_table::const_iterator const_it = it;
+        REQUIRE(it->first + 1 == it->second);
+    }
 }

@@ -25,7 +25,7 @@ struct uptr_eq {
 typedef cuckoohash_map<uptr, uptr, uptr_hash, uptr_eq> uptr_tbl;
 
 const size_t TBL_INIT = 1;
-const size_t TBL_SIZE = TBL_INIT * uptr_tbl::slot_per_bucket * 2;
+const size_t TBL_SIZE = TBL_INIT * uptr_tbl::slot_per_bucket() * 2;
 
 struct CheckKeyFn {
     explicit CheckKeyFn(int expected_val) : expected_val(expected_val) {}

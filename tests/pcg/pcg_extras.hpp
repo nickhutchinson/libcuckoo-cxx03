@@ -56,10 +56,15 @@
  * Abstractions for compiler-specific directives
  */
 
-#ifdef __GNUC__
+#if defined(_MSC_VER)
+    #define PCG_NOINLINE __declspec(noinline)
+    #define PCG_ALWAYS_INLINE __forceinline
+#elif defined(__GNU__)
     #define PCG_NOINLINE __attribute__((noinline))
+    #define PCG_ALWAYS_INLINE __attribute__((always_inline))
 #else
     #define PCG_NOINLINE
+    #define PCG_ALWAYS_INLINE
 #endif
 
 /*

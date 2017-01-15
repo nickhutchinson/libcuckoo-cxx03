@@ -11,9 +11,7 @@
 #include <mutex>
 #include <random>
 #include <stdint.h>
-#include <sys/time.h>
 #include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -107,8 +105,8 @@ void InsertThroughputTest(InsertEnvironment<T> *env) {
     std::vector<std::thread> threads;
     size_t keys_per_thread = env->numkeys * ((g_end_load-g_begin_load) / 100.0) /
         g_thread_num;
-    timeval t1, t2;
-    gettimeofday(&t1, NULL);
+    std::chrono::high_resolution_clock::time_point t1, t2;
+    t1 = std::chrono::high_resolution_clock::now();
     for (size_t i = 0; i < g_thread_num; i++) {
         threads.emplace_back(
             insert_thread<T>::func, std::ref(env->table),
@@ -118,9 +116,9 @@ void InsertThroughputTest(InsertEnvironment<T> *env) {
     for (size_t i = 0; i < threads.size(); i++) {
         threads[i].join();
     }
-    gettimeofday(&t2, NULL);
-    double elapsed_time = (t2.tv_sec - t1.tv_sec) * 1000.0; // sec to ms
-    elapsed_time += (t2.tv_usec - t1.tv_usec) / 1000.0; // us to ms
+    t2 = std::chrono::high_resolution_clock::now();
+    double elapsed_time =
+        std::chrono::duration<double, std::milli>(t2 - t1).count();
     size_t num_inserts = env->table.size() - env->init_size;
     // Reports the results
     std::cout << "----------Results----------" << std::endl;

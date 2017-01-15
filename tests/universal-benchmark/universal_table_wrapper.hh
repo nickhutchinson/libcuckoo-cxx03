@@ -130,7 +130,7 @@ private:
     // sampling period a power of 2 makes it easy to check whether we need to
     // add a sample.
     static constexpr size_t sampling_period_power = 17;
-    static constexpr size_t sampling_period = 1UL << 17;
+    static constexpr size_t sampling_period = 1ULL << 17;
     static constexpr size_t sampling_period_mask = sampling_period - 1;
     const size_t total_samples;
     size_t current_iter;

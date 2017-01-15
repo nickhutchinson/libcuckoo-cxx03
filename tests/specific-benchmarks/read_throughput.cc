@@ -12,9 +12,7 @@
 #include <numeric>
 #include <random>
 #include <stdint.h>
-#include <sys/time.h>
 #include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -127,7 +125,7 @@ void ReadThroughputTest(ReadEnvironment<T> *env) {
             env->keys.begin() + (i+1)*out_keys_per_thread + env->init_size,
             std::ref(counter), false, std::ref(finished));
     }
-    sleep(g_test_len);
+    std::this_thread::sleep_for(std::chrono::seconds(g_test_len));
     finished.store(true, std::memory_order_release);
     for (size_t i = 0; i < threads.size(); i++) {
         threads[i].join();

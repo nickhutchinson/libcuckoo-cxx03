@@ -80,8 +80,15 @@ public:
     /**
      * Destructor. Destroys all elements allocated in the array.
      */
-    ~libcuckoo_lazy_array()
-        noexcept(std::is_nothrow_destructible<T>::value) {
+    ~libcuckoo_lazy_array() noexcept(
+#ifndef _MSC_VER
+        std::is_nothrow_destructible<T>::value
+#else
+        // Workaround MSVC 2015 internal compiler error with the above
+        // expression.
+        false
+#endif
+        ) {
         clear();
     }
 
@@ -130,7 +137,7 @@ public:
      * @return maximum size of the array
      */
     static constexpr size_type max_size() {
-        return 1UL << (OFFSET_BITS + SEGMENT_BITS);
+        return 1ULL << (OFFSET_BITS + SEGMENT_BITS);
     }
 
     /**
@@ -152,8 +159,8 @@ public:
     }
 
 private:
-    static constexpr size_type SEGMENT_SIZE = 1UL << OFFSET_BITS;
-    static constexpr size_type NUM_SEGMENTS = 1UL << SEGMENT_BITS;
+    static constexpr size_type SEGMENT_SIZE = 1ULL << OFFSET_BITS;
+    static constexpr size_type NUM_SEGMENTS = 1ULL << SEGMENT_BITS;
     static constexpr size_type OFFSET_MASK = SEGMENT_SIZE - 1;
 
     std::array<T*, NUM_SEGMENTS> segments_;

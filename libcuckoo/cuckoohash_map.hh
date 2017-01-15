@@ -922,11 +922,17 @@ private:
         template <typename K, typename... Args>
         void setKV(allocator_type& allocator, size_type ind, partial_t p,
                    K& k, Args&&... args) {
+            // We want to std::move() the key into place, but this fails under
+            // MSVC if K is an array type. We cast to rvalue-ref (as std::move
+            // does) only if K is not of array type.
+            using movable_key_t =
+                typename std::conditional<!std::is_array<K>::value, K&&,
+                                          K&>::type;
             partials_[ind] = p;
             occupied_[ind] = true;
             allocator_traits_::construct(
                 allocator, &storage_kvpair(ind), std::piecewise_construct,
-                std::forward_as_tuple(std::move(k)),
+                std::forward_as_tuple(static_cast<movable_key_t>(k)),
                 std::forward_as_tuple(std::forward<Args>(args)...));
         }
 
@@ -967,12 +973,12 @@ private:
         }
 
     private:
-        std::array<partial_t, slot_per_bucket()> partials_;
-        std::bitset<slot_per_bucket()> occupied_;
+        std::array<partial_t, SLOT_PER_BUCKET> partials_;
+        std::bitset<SLOT_PER_BUCKET> occupied_;
         std::array<typename std::aligned_storage<
                        sizeof(storage_value_type),
                        alignof(storage_value_type)>::type,
-                   slot_per_bucket()> kvpairs_;
+                   SLOT_PER_BUCKET> kvpairs_;
     };
 
     class BucketContainer {
@@ -1868,7 +1874,7 @@ private:
     static size_type reserve_calc(const size_type n) {
         const size_type buckets = (n + slot_per_bucket() - 1) / slot_per_bucket();
         size_type blog2;
-        for (blog2 = 1; (1UL << blog2) < buckets; ++blog2);
+        for (blog2 = 1; (1ULL << blog2) < buckets; ++blog2);
         assert(n <= hashsize(blog2) * slot_per_bucket());
         return blog2;
     }
@@ -1934,18 +1940,18 @@ public:
         /** @name Type Declarations */
         /**@{*/
 
-        using key_type = cuckoohash_map::key_type;
-        using mapped_type = cuckoohash_map::mapped_type;
-        using value_type = cuckoohash_map::value_type;
-        using size_type = cuckoohash_map::size_type;
-        using difference_type = cuckoohash_map::difference_type;
-        using hasher = cuckoohash_map::hasher;
-        using key_equal = cuckoohash_map::key_equal;
-        using allocator_type = cuckoohash_map::allocator_type;
-        using reference = cuckoohash_map::reference;
-        using const_reference = cuckoohash_map::const_reference;
-        using pointer = cuckoohash_map::pointer;
-        using const_pointer = cuckoohash_map::const_pointer;
+        using key_type = typename cuckoohash_map::key_type;
+        using mapped_type = typename cuckoohash_map::mapped_type;
+        using value_type = typename cuckoohash_map::value_type;
+        using size_type = typename cuckoohash_map::size_type;
+        using difference_type = typename cuckoohash_map::difference_type;
+        using hasher = typename cuckoohash_map::hasher;
+        using key_equal = typename cuckoohash_map::key_equal;
+        using allocator_type = typename cuckoohash_map::allocator_type;
+        using reference = typename cuckoohash_map::reference;
+        using const_reference = typename cuckoohash_map::const_reference;
+        using pointer = typename cuckoohash_map::pointer;
+        using const_pointer = typename cuckoohash_map::const_pointer;
 
         /**
          * A constant iterator over a @ref locked_table, which allows read-only
@@ -1954,10 +1960,10 @@ public:
          */
         class const_iterator {
         public:
-            using difference_type = locked_table::difference_type;
-            using value_type = locked_table::value_type;
-            using pointer = locked_table::const_pointer;
-            using reference = locked_table::const_reference;
+            using difference_type = typename locked_table::difference_type;
+            using value_type = typename locked_table::value_type;
+            using pointer = typename locked_table::const_pointer;
+            using reference = typename locked_table::const_reference;
             using iterator_category = std::bidirectional_iterator_tag;
 
             const_iterator() {}
@@ -2085,8 +2091,8 @@ public:
          */
         class iterator : public const_iterator {
         public:
-            using pointer = cuckoohash_map::pointer;
-            using reference = cuckoohash_map::reference;
+            using pointer = typename cuckoohash_map::pointer;
+            using reference = typename cuckoohash_map::reference;
 
             iterator() {}
 

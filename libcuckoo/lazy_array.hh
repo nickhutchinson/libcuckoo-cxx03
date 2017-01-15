@@ -12,7 +12,10 @@
 #include <boost/config.hpp>
 #include <boost/container/allocator_traits.hpp>
 #include <boost/move/move.hpp>
-#include <boost/type_traits.hpp>
+
+#if !defined(BOOST_NO_CXX11_HDR_TYPE_TRAITS)
+#include <type_traits>
+#endif
 
 #include "cuckoohash_util.hh"
 
@@ -93,20 +96,20 @@ public:
 
     //! Move constructor for a lazy array
     libcuckoo_lazy_array(BOOST_RV_REF(libcuckoo_lazy_array) arr)
-        BOOST_NOEXCEPT_IF(boost::is_nothrow_destructible<T>::value)
+        BOOST_NOEXCEPT_IF(std::is_nothrow_destructible<T>::value)
         : segments_() {
         move_other_array(boost::move(arr));
     }
 
     //! Move assignment for a lazy array
     libcuckoo_lazy_array& operator=(BOOST_RV_REF(libcuckoo_lazy_array) arr)
-        BOOST_NOEXCEPT_IF(boost::is_nothrow_destructible<T>::value) {
+        BOOST_NOEXCEPT_IF(std::is_nothrow_destructible<T>::value) {
         move_other_vector(boost::move(arr));
         return *this;
     }
 
     ~libcuckoo_lazy_array()
-        BOOST_NOEXCEPT_IF(boost::is_nothrow_destructible<T>::value) {
+        BOOST_NOEXCEPT_IF(std::is_nothrow_destructible<T>::value) {
         clear();
     }
 

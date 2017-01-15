@@ -11,6 +11,7 @@ size_t foo_hashes;
 size_t int_hashes;
 
 class Foo {
+    BOOST_COPYABLE_AND_MOVABLE(Foo);
 public:
     int val;
 
@@ -22,6 +23,11 @@ public:
     Foo(const Foo& x) {
         ++copy_constructions;
         val = x.val;
+    }
+
+    Foo& operator=(BOOST_COPY_ASSIGN_REF(Foo) other) {
+        val = other.val;
+        return *this;
     }
 
     ~Foo() {
@@ -90,7 +96,8 @@ TEST_CASE("heterogeneous compare", "[heterogeneous compare]") {
     SECTION("foo insert") {
         {
             foo_map map;
-            map.insert(Foo(0), true);
+            Foo k(0);
+            map.insert(boost::move(k), true);
         }
         REQUIRE(int_constructions == 1);
         REQUIRE(copy_constructions == 2);

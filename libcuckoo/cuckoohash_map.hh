@@ -30,6 +30,7 @@
 #include <boost/interprocess/containers/pair.hpp>
 #include <boost/lexical_cast.hpp>
 #include <boost/move/move.hpp>
+#include <boost/move/unique_ptr.hpp>
 #include <boost/ref.hpp>
 #include <boost/static_assert.hpp>
 #include <boost/thread.hpp>
@@ -49,16 +50,16 @@
  * A concurrent hash table
  *
  * @tparam Key type of keys in the table
- * @tparam T type of values in the table
+ * @tparam Value type of values in the table
  * @tparam Pred type of equality comparison functor
  * @tparam Alloc type of key-value pair allocator
  * @tparam SLOT_PER_BUCKET number of slots for each bucket in the table
  */
 template < class Key,
-           class T,
+           class Value,
            class Hash = boost::hash<Key>,
            class Pred = std::equal_to<Key>,
-           class Alloc = std::allocator<std::pair<const Key, T> >,
+           class Alloc = std::allocator<std::pair<const Key, Value> >,
            std::size_t SLOT_PER_BUCKET = LIBCUCKOO_DEFAULT_SLOT_PER_BUCKET
            >
 class cuckoohash_map {
@@ -67,8 +68,8 @@ public:
     /**@{*/
 
     typedef Key key_type;
-    typedef T mapped_type;
-    typedef std::pair<const Key, T> value_type;
+    typedef Value mapped_type;
+    typedef std::pair<const Key, Value> value_type;
     typedef std::size_t size_type;
     typedef std::ptrdiff_t difference_type;
     typedef Hash hasher;
@@ -177,7 +178,7 @@ public:
      * @return the bucket count
      */
     size_type bucket_count() const {
-        return buckets_.size();
+        return hashsize(hashpower());
     }
 
     /**
@@ -373,7 +374,7 @@ public:
      */
     template <typename K, typename V>
     bool insert(BOOST_FWD_REF(K) key, BOOST_FWD_REF(V) val) {
-        key_type k(boost::forward<K>(key));
+        typename forwarded_type<K>::type k(boost::forward<K>(key));
         hash_value hv = hashed_key(k);
         TwoBuckets b = snapshot_and_lock_two(hv);
         table_position pos = cuckoo_insert_loop(hv, b, k);
@@ -456,7 +457,7 @@ public:
      */
     template <typename K, typename Updater, typename V>
     void upsert(BOOST_FWD_REF(K) key, Updater fn, BOOST_FWD_REF(V) val) {
-        key_type k(boost::forward<K>(key));
+        typename forwarded_type<K>::type k(boost::forward<K>(key));
         const hash_value hv = hashed_key(k);
         table_position pos;
         do {
@@ -610,6 +611,39 @@ private:
     public:
         spinlock() BOOST_NOEXCEPT_OR_NOTHROW : elem_counter_(0) {}
 
+        // Relaxed atomic integer type used for storing the per-bucket item
+        // count.  Must be written to while holding the bucket lock.
+        class counter {
+        public:
+            counter(size_type v) : val_(v) {}
+
+            operator size_type() const {
+                return val_.load(boost::memory_order_relaxed);
+            }
+
+            size_type operator=(size_type desired) {
+                val_.store(desired, boost::memory_order_relaxed);
+                return desired;
+            }
+
+            counter& operator++() {
+                val_.store(1 + val_.load(boost::memory_order_relaxed),
+                           boost::memory_order_relaxed);
+                return *this;
+            }
+
+            counter& operator--() {
+                val_.store(-1 + val_.load(boost::memory_order_relaxed),
+                           boost::memory_order_relaxed);
+                return *this;
+            }
+
+        private:
+            BOOST_DELETED_FUNCTION(counter(const counter&));
+            BOOST_DELETED_FUNCTION(void operator=(const counter&));
+            boost::atomic<size_type> val_;
+        };
+
         void lock() {
             lock_.lock();
             LIBCUCKOO_ANNOTATE_HAPPENS_AFTER(this);
@@ -631,13 +665,11 @@ private:
             return true;
         }
 
-        size_type& elem_counter() {
-            return elem_counter_;
-        }
+        counter& elem_counter() { return elem_counter_; }
 
     private:
         tbb::spin_rw_mutex lock_;
-        size_type elem_counter_;
+        counter elem_counter_;
     };
 
     // The type of the locks container
@@ -665,10 +697,11 @@ private:
         OneBucket() {}
         OneBucket(locks_t* locks, size_type i)
             : locks_(locks, OneUnlocker(i)) {}
-        OneBucket(BOOST_RV_REF(OneBucket) other)
+        OneBucket(BOOST_RV_REF(OneBucket) other) BOOST_NOEXCEPT_OR_NOTHROW
             : locks_(boost::move(other.locks_)) {}
 
-        OneBucket& operator=(BOOST_RV_REF(OneBucket) other) {
+        OneBucket& operator=(BOOST_RV_REF(OneBucket) other)
+            BOOST_NOEXCEPT_OR_NOTHROW {
             locks_ = boost::move(other.locks_);
             return *this;
         }
@@ -691,7 +724,7 @@ private:
         TwoBuckets() {}
         TwoBuckets(locks_t* locks, size_type i1, size_type i2)
             : locks_(locks, TwoUnlocker(i1, i2)) {}
-        TwoBuckets(BOOST_RV_REF(TwoBuckets) other)
+        TwoBuckets(BOOST_RV_REF(TwoBuckets) other) BOOST_NOEXCEPT_OR_NOTHROW
             : locks_(boost::move(other.locks_)) {}
 
         size_type first() const {
@@ -710,7 +743,8 @@ private:
             locks_.reset(NULL);
         }
 
-        TwoBuckets& operator=(BOOST_RV_REF(TwoBuckets) other) {
+        TwoBuckets& operator=(BOOST_RV_REF(TwoBuckets) other)
+            BOOST_NOEXCEPT_OR_NOTHROW {
             locks_ = boost::move(other.locks_);
             return *this;
         }
@@ -738,7 +772,7 @@ private:
     class AllBuckets {
     public:
         AllBuckets(locks_t* locks) : locks_(locks) {}
-        AllBuckets(BOOST_RV_REF(AllBuckets) other)
+        AllBuckets(BOOST_RV_REF(AllBuckets) other) BOOST_NOEXCEPT_OR_NOTHROW
             : locks_(boost::move(other.locks_)) {}
 
         bool is_active() const {
@@ -753,7 +787,8 @@ private:
             (void)locks_.release();
         }
 
-        AllBuckets& operator=(BOOST_RV_REF(AllBuckets) other) {
+        AllBuckets& operator=(BOOST_RV_REF(AllBuckets) other)
+            BOOST_NOEXCEPT_OR_NOTHROW {
             locks_ = boost::move(other.locks_);
         }
 
@@ -967,9 +1002,20 @@ private:
                    K& k, BOOST_FWD_REF(V) v) {
             partials_[ind] = p;
             occupied_[ind] = true;
+#if _MSC_VER
+            // We want to std::move() the key into place, but this fails under
+            // MSVC if K is an array type. We cast to rvalue-ref (as std::move
+            // does) only if K is not of array type.
+            typedef typename boost::conditional<!boost::is_array<K>::value, K&&,
+                                                K&>::type movable_key_t;
+            boost::container::allocator_traits<allocator_type>::construct(
+                alloc, &storage_kvpair(ind), static_cast<movable_key_t>(k),
+                boost::forward<V>(v));
+#else
             boost::container::allocator_traits<allocator_type>::construct(
                 alloc, &storage_kvpair(ind), boost::move(k),
                 boost::forward<V>(v));
+#endif
         }
 
         void eraseKV(size_type ind) {
@@ -1639,8 +1685,8 @@ private:
     // constructor is not noexcept, we use cuckoo_expand_simple, since that
     // provides a strong exception guarantee.
     cuckoo_status cuckoo_fast_double(size_type current_hp) {
-        if (!boost::is_nothrow_move_constructible<key_type>::value ||
-            !boost::is_nothrow_move_constructible<mapped_type>::value) {
+        if (!boost::has_nothrow_move<key_type>::value ||
+            !boost::has_nothrow_move<mapped_type>::value) {
             LIBCUCKOO_DBG("%s", "cannot run cuckoo_fast_double because kv-pair "
                           "is not nothrow move constructible");
             return cuckoo_expand_simple(current_hp + 1, true);
@@ -1989,7 +2035,7 @@ private:
     static size_type reserve_calc(const size_type n) {
         const size_type buckets = (n + slot_per_bucket() - 1) / slot_per_bucket();
         size_type blog2;
-        for (blog2 = 1; (1UL << blog2) < buckets; ++blog2);
+        for (blog2 = 1; (1ULL << blog2) < buckets; ++blog2);
         assert(n <= hashsize(blog2) * slot_per_bucket());
         return blog2;
     }
@@ -2095,10 +2141,10 @@ public:
          */
         class const_iterator {
         public:
-            typedef cuckoohash_map::difference_type difference_type;
-            typedef cuckoohash_map::value_type value_type;
-            typedef cuckoohash_map::const_pointer pointer;
-            typedef cuckoohash_map::const_reference reference;
+            typedef typename cuckoohash_map::difference_type difference_type;
+            typedef typename cuckoohash_map::value_type value_type;
+            typedef typename cuckoohash_map::const_pointer pointer;
+            typedef typename cuckoohash_map::const_reference reference;
             typedef std::bidirectional_iterator_tag iterator_category;
 
             // Return true if the iterators are from the same locked table and
@@ -2224,10 +2270,10 @@ public:
          */
         class iterator : public const_iterator {
         public:
-            typedef cuckoohash_map::difference_type difference_type;
-            typedef cuckoohash_map::value_type value_type;
-            typedef cuckoohash_map::pointer pointer;
-            typedef cuckoohash_map::reference reference;
+            typedef typename cuckoohash_map::difference_type difference_type;
+            typedef typename cuckoohash_map::value_type value_type;
+            typedef typename cuckoohash_map::pointer pointer;
+            typedef typename cuckoohash_map::reference reference;
             typedef std::bidirectional_iterator_tag iterator_category;
 
             bool operator==(const iterator& it) const {
@@ -2365,6 +2411,13 @@ public:
         return locked_table(*this);
     }
 
+private:
+#if defined(BOOST_NO_CXX11_RVALUE_REFERENCES)
+    template <typename T> struct forwarded_type { typedef const T& type; };
+    template <typename T> struct forwarded_type<boost::rv<T> > { typedef T type; };
+#else
+    template <typename T> struct forwarded_type { typedef T type; };
+#endif  // defined(BOOST_NO_CXX11_RVALUE_REFERENCES)
 };
 
 #endif // _CUCKOOHASH_MAP_HH

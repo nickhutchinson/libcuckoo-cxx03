@@ -6,3 +6,7 @@ target_link_libraries(hellohash libcuckoo)
 
 add_executable(count_freq count_freq.cc)
 target_link_libraries(count_freq libcuckoo)
+
+add_test(NAME nested_table COMMAND nested_table)
+add_test(NAME hellohash COMMAND hellohash)
+add_test(NAME count_freq COMMAND count_freq)
